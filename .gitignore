@@ -1,0 +1,69 @@
+# JarViewer - Main .gitignore
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Docker volumes
+docker-volumes/
+
+# Other folder (unnecessary files)
+other/
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Archive files (except for test samples)
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# JAR files (uploaded for analysis)
+uploads/
+*.jar
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Documentation build
+docs/_build/
+site/
