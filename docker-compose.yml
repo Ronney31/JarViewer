@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+    environment:
+      - PYTHONPATH=/app
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - CORS_ORIGINS=http://localhost:3000
+      - MAX_FILE_SIZE=524288000  # 500MB
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - jarviewer-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_ENVIRONMENT=development
+    command: pnpm dev --host 0.0.0.0
+    depends_on:
+      - backend
+    networks:
+      - jarviewer-network
+
+  # Optional: Redis for caching (can be enabled later)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - jarviewer-network
+    profiles:
+      - caching
+
+  # Optional: Prometheus for monitoring (can be enabled later)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - jarviewer-network
+    profiles:
+      - monitoring
+
+volumes:
+  redis_data:
+  prometheus_data:
+
+networks:
+  jarviewer-network:
+    driver: bridge
