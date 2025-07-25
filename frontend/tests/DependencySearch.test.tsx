@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import DependencySearch from '../DependencySearch';
+import DependencySearch from '../src/components/DependencySearch';
 import { SearchFilters, DependencyNode, DependencyTree } from '@/stores/singleJarDashboardStore';
 
 // Mock framer-motion
@@ -14,7 +14,7 @@ vi.mock('framer-motion', () => ({
 }));
 
 // Mock the DependencySearchFilter component
-vi.mock('../DependencySearchFilter', () => {
+vi.mock('../src/components/DependencySearchFilter', () => {
   return {
     default: function MockDependencySearchFilter({ filters, onFiltersChange }: any) {
       return (

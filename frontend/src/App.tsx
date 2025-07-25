@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Toaster } from 'react-hot-toast'
+import { Package } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { ThemeProvider } from './components/ThemeProvider'
 import { Header } from './components/Header'
 import { FileUpload } from './components/FileUpload'
@@ -7,7 +9,7 @@ import { FileTree } from './components/FileTree'
 import { CodeViewer } from './components/CodeViewer'
 import { MetadataPanel } from './components/MetadataPanel'
 import { StatusBar } from './components/StatusBar'
-import DependencyDashboard from './components/DependencyDashboard'
+import SingleJarDashboard from './components/SingleJarDashboard'
 import { useJarViewerStore } from './stores/jarViewerStore'
 import './index.css'
 
@@ -27,7 +29,57 @@ function App() {
     clearError
   } = useJarViewerStore()
 
-  const [viewMode, setViewMode] = useState<ViewMode>('files')
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    // Initialize view mode from URL hash
+    const hash = window.location.hash.slice(1)
+    return hash === 'dependencies' ? 'dependencies' : 'files'
+  })
+
+  // Handle view mode changes and URL updates
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode)
+    // Update URL hash to reflect current view
+    window.history.replaceState(null, '', mode === 'dependencies' ? '#dependencies' : '#files')
+  }
+
+  // Keyboard shortcuts for navigation
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Only handle shortcuts when a JAR is loaded and no input is focused
+      if (!currentJar || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return
+      }
+
+      // Alt + 1: Switch to Files view
+      if (event.altKey && event.key === '1') {
+        event.preventDefault()
+        handleViewModeChange('files')
+      }
+      
+      // Alt + 2: Switch to Dependencies view
+      if (event.altKey && event.key === '2') {
+        event.preventDefault()
+        handleViewModeChange('dependencies')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [currentJar])
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.slice(1)
+      const newMode = hash === 'dependencies' ? 'dependencies' : 'files'
+      if (newMode !== viewMode) {
+        setViewMode(newMode)
+      }
+    }
+
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [viewMode])
 
   return (
     <ThemeProvider>
@@ -37,7 +89,7 @@ function App() {
           <Header 
             currentJar={currentJar}
             viewMode={viewMode}
-            onViewModeChange={setViewMode}
+            onViewModeChange={handleViewModeChange}
           />
         </div>
 
@@ -73,7 +125,9 @@ function App() {
               {/* Metadata Panel */}
               {currentJar && (
                 <div className="border-t">
-                  <MetadataPanel />
+                  <MetadataPanel 
+                    onNavigateToDependencies={() => handleViewModeChange('dependencies')}
+                  />
                 </div>
               )}
             </div>
@@ -102,30 +156,116 @@ function App() {
           </button>
 
           {/* Main Content */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div 
+            className="flex-1 flex flex-col overflow-hidden"
+            onContextMenu={(e) => {
+              if (currentJar) {
+                e.preventDefault()
+                // Show context menu for view switching
+                const contextMenu = document.createElement('div')
+                contextMenu.className = 'fixed bg-card border border-border rounded-lg shadow-lg p-2 z-50'
+                contextMenu.style.left = `${e.clientX}px`
+                contextMenu.style.top = `${e.clientY}px`
+                
+                const filesOption = document.createElement('button')
+                filesOption.className = 'w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors'
+                filesOption.textContent = 'File Structure'
+                filesOption.onclick = () => {
+                  handleViewModeChange('files')
+                  document.body.removeChild(contextMenu)
+                }
+                
+                const depsOption = document.createElement('button')
+                depsOption.className = 'w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors'
+                depsOption.textContent = 'Dependency Analysis'
+                depsOption.onclick = () => {
+                  handleViewModeChange('dependencies')
+                  document.body.removeChild(contextMenu)
+                }
+                
+                contextMenu.appendChild(filesOption)
+                contextMenu.appendChild(depsOption)
+                document.body.appendChild(contextMenu)
+                
+                // Remove context menu when clicking elsewhere
+                const removeMenu = () => {
+                  if (document.body.contains(contextMenu)) {
+                    document.body.removeChild(contextMenu)
+                  }
+                  document.removeEventListener('click', removeMenu)
+                }
+                setTimeout(() => document.addEventListener('click', removeMenu), 100)
+              }
+            }}
+          >
             {/* Navigation Bar for Dependency Dashboard */}
             {viewMode === 'dependencies' && currentJar && (
-              <div className="flex items-center justify-between p-4 border-b bg-gray-50 dark:bg-gray-800">
-                <button
-                  onClick={() => setViewMode('files')}
-                  className="flex items-center px-3 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                  Back to Files
-                </button>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  Dependency Analysis - {currentJar.name}
-                </h2>
-                <div></div>
+              <div className="flex items-center justify-between p-4 border-b bg-card border-border">
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={() => handleViewModeChange('files')}
+                    className="flex items-center px-3 py-2 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-accent"
+                    title="Back to File Structure"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Back to Files
+                  </button>
+                  
+                  {/* Breadcrumb Navigation */}
+                  <nav className="flex items-center space-x-2 text-sm">
+                    <span className="text-muted-foreground">JarViewer</span>
+                    <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                    <button
+                      onClick={() => handleViewModeChange('files')}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {currentJar.name}
+                    </button>
+                    <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span className="text-foreground font-medium">Dependency Analysis</span>
+                  </nav>
+                </div>
+                
+                <div className="flex items-center space-x-3">
+                  <div className="text-sm text-muted-foreground">
+                    <span className="font-medium">{currentJar.name}</span>
+                    <span className="ml-2">
+                      ({(currentJar.size / 1024 / 1024).toFixed(1)} MB)
+                    </span>
+                  </div>
+                  
+                  {/* Quick Actions */}
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handleViewModeChange('files')}
+                      className="px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition-colors"
+                      title="View File Structure"
+                    >
+                      Files
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
             
             {/* Content Area */}
             <div className="flex-1 overflow-hidden">
-              {!currentJar ? (
-                <div className="flex items-center justify-center h-full">
+              <AnimatePresence mode="wait">
+                {!currentJar ? (
+                <motion.div
+                  key="welcome"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.3 }}
+                  className="flex items-center justify-center h-full"
+                >
                   <div className="text-center max-w-md">
                     <div className="mb-6">
                       <svg className="w-20 h-20 mx-auto text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -144,16 +284,41 @@ function App() {
                       </p>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               ) : viewMode === 'dependencies' ? (
-                <DependencyDashboard 
-                  jarId={currentJar.id} 
-                  isVisible={true}
-                />
+                <motion.div
+                  key="dependencies"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.3 }}
+                  className="h-full"
+                >
+                  <SingleJarDashboard 
+                    jarId={currentJar.id}
+                    className="h-full"
+                  />
+                </motion.div>
               ) : selectedFile ? (
-                <CodeViewer />
+                <motion.div
+                  key="codeviewer"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.3 }}
+                  className="h-full"
+                >
+                  <CodeViewer />
+                </motion.div>
               ) : (
-                <div className="flex items-center justify-center h-full">
+                <motion.div
+                  key="fileselect"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.3 }}
+                  className="flex items-center justify-center h-full"
+                >
                   <div className="text-center">
                     <div className="mb-4">
                       <svg className="w-16 h-16 mx-auto text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -164,19 +329,35 @@ function App() {
                     <p className="text-muted-foreground mb-4">
                       Choose a file from the tree on the left to view its contents
                     </p>
-                    <div className="bg-card p-3 rounded-lg border text-sm mb-4">
-                      <p className="text-muted-foreground">
-                        <strong>JAR loaded:</strong> {currentJar.name}<br/>
-                        <strong>Files:</strong> {currentJar.stats.totalFiles} files, {currentJar.stats.totalDirectories} directories
-                      </p>
+                    <div className="bg-card p-4 rounded-lg border text-sm mb-4">
+                      <div className="space-y-2">
+                        <p className="text-muted-foreground">
+                          <strong>JAR loaded:</strong> {currentJar.name}<br/>
+                          <strong>Files:</strong> {currentJar.stats.totalFiles} files, {currentJar.stats.totalDirectories} directories
+                        </p>
+                        <div className="flex items-center justify-between pt-2 border-t">
+                          <span className="text-muted-foreground">Ready for dependency analysis</span>
+                          <button
+                            onClick={() => handleViewModeChange('dependencies')}
+                            className="flex items-center space-x-2 px-3 py-1.5 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
+                          >
+                            <Package className="h-4 w-4" />
+                            <span>Analyze Dependencies</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               )}
+            </AnimatePresence>
             </div>
 
             {/* Status Bar */}
-            <StatusBar />
+            <StatusBar 
+              viewMode={viewMode}
+              onViewModeChange={handleViewModeChange}
+            />
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import DependencyTreeView from '../DependencyTreeView';
+import DependencyTreeView from '../src/components/DependencyTreeView';
 import { DependencyNode, DependencyTree, SearchFilters } from '@/stores/singleJarDashboardStore';
 
 // Mock framer-motion to avoid animation issues in tests

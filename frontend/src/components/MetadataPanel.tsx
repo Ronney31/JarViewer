@@ -1,7 +1,11 @@
-import { Info, Package, Shield, Clock } from 'lucide-react'
+import { Info, Package, Shield, Clock, BarChart3, ArrowRight } from 'lucide-react'
 import { useJarViewerStore } from '@/stores/jarViewerStore'
 
-export function MetadataPanel() {
+interface MetadataPanelProps {
+  onNavigateToDependencies?: () => void;
+}
+
+export function MetadataPanel({ onNavigateToDependencies }: MetadataPanelProps = {}) {
   const { metadata, currentJar } = useJarViewerStore()
 
   if (!currentJar || !metadata) {
@@ -94,9 +98,22 @@ export function MetadataPanel() {
         {/* Dependencies */}
         {metadata.dependencies && metadata.dependencies.length > 0 && (
           <div className="space-y-2">
-            <div className="flex items-center space-x-2">
-              <Info className="h-4 w-4 text-primary" />
-              <h4 className="font-medium text-sm">Dependencies</h4>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Info className="h-4 w-4 text-primary" />
+                <h4 className="font-medium text-sm">Dependencies</h4>
+              </div>
+              {onNavigateToDependencies && (
+                <button
+                  onClick={onNavigateToDependencies}
+                  className="flex items-center space-x-1 px-2 py-1 text-xs bg-primary/10 text-primary rounded hover:bg-primary/20 transition-colors"
+                  title="Analyze all dependencies"
+                >
+                  <BarChart3 className="h-3 w-3" />
+                  <span>Analyze</span>
+                  <ArrowRight className="h-3 w-3" />
+                </button>
+              )}
             </div>
             <div className="space-y-1 text-xs">
               {metadata.dependencies.slice(0, 5).map((dep, index) => (
@@ -111,6 +128,32 @@ export function MetadataPanel() {
                 </div>
               )}
             </div>
+            {onNavigateToDependencies && (
+              <button
+                onClick={onNavigateToDependencies}
+                className="w-full mt-2 px-3 py-2 text-xs bg-accent text-accent-foreground rounded hover:bg-accent/80 transition-colors flex items-center justify-center space-x-2"
+              >
+                <BarChart3 className="h-4 w-4" />
+                <span>Full Dependency Analysis</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Quick Actions */}
+        {onNavigateToDependencies && (
+          <div className="space-y-2 pt-2 border-t">
+            <div className="flex items-center space-x-2">
+              <BarChart3 className="h-4 w-4 text-primary" />
+              <h4 className="font-medium text-sm">Quick Actions</h4>
+            </div>
+            <button
+              onClick={onNavigateToDependencies}
+              className="w-full px-3 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors flex items-center justify-center space-x-2"
+            >
+              <Package className="h-4 w-4" />
+              <span>Analyze Dependencies</span>
+            </button>
           </div>
         )}
       </div>

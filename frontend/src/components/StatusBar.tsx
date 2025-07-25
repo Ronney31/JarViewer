@@ -1,7 +1,14 @@
-import { Activity, Clock, HardDrive } from 'lucide-react'
+import { Activity, Clock, HardDrive, Code2, Package } from 'lucide-react'
 import { useJarViewerStore } from '@/stores/jarViewerStore'
 
-export function StatusBar() {
+type ViewMode = 'files' | 'dependencies';
+
+interface StatusBarProps {
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
+}
+
+export function StatusBar({ viewMode, onViewModeChange }: StatusBarProps = {}) {
   const { currentJar, selectedFile, isLoading, processingProgress } = useJarViewerStore()
 
   return (
@@ -20,6 +27,30 @@ export function StatusBar() {
           <div className="flex items-center space-x-2">
             <Activity className="h-3 w-3" />
             <span>Ready</span>
+          </div>
+        )}
+        
+        {/* View Mode Indicator */}
+        {currentJar && viewMode && onViewModeChange && (
+          <div className="flex items-center space-x-2">
+            <span>View:</span>
+            <button
+              onClick={() => onViewModeChange(viewMode === 'files' ? 'dependencies' : 'files')}
+              className="flex items-center space-x-1 px-2 py-0.5 rounded hover:bg-accent transition-colors"
+              title={`Switch to ${viewMode === 'files' ? 'Dependency Analysis' : 'File Structure'}`}
+            >
+              {viewMode === 'files' ? (
+                <>
+                  <Code2 className="h-3 w-3" />
+                  <span>Files</span>
+                </>
+              ) : (
+                <>
+                  <Package className="h-3 w-3" />
+                  <span>Dependencies</span>
+                </>
+              )}
+            </button>
           </div>
         )}
         

@@ -8,7 +8,9 @@ import {
   AlertTriangle,
   Info,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { useJarViewerStore } from '@/stores/jarViewerStore';
 import { useSingleJarDashboardStore } from '@/stores/singleJarDashboardStore';
@@ -16,6 +18,9 @@ import DependencyTreeView from './DependencyTreeView';
 import DependencySearchFilter from './DependencySearchFilter';
 import ConflictVisualization from './ConflictVisualization';
 import ExportControls from './ExportControls';
+import LoadingIndicator from './LoadingIndicator';
+import ErrorBoundary from './ErrorBoundary';
+import { AnalysisError } from '@/types/errors';
 
 interface SingleJarDashboardProps {
   jarId: string;
@@ -26,21 +31,27 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
   jarId, 
   className = '' 
 }) => {
-  const { currentJar, theme } = useJarViewerStore();
+  const { currentJar } = useJarViewerStore();
   const {
     analysisData,
-    isLoading,
+    partialResult,
+    loadingState,
     error,
+    errors,
     searchQuery,
     filters,
     selectedDependency,
     expandedNodes,
+    canRetry,
     loadAnalysis,
+    cancelAnalysis,
+    retryAnalysis,
     setSearchQuery,
     setFilters,
     setSelectedDependency,
     toggleNodeExpansion,
     clearError,
+    clearAllErrors,
     reset
   } = useSingleJarDashboardStore();
 
@@ -78,21 +89,76 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
     toggleNodeExpansion(nodeId);
   }, [toggleNodeExpansion]);
 
+  // Handle retry
+  const handleRetry = useCallback(() => {
+    retryAnalysis(jarId);
+  }, [retryAnalysis, jarId]);
+
+  // Handle cancel
+  const handleCancel = useCallback(() => {
+    cancelAnalysis(jarId);
+  }, [cancelAnalysis, jarId]);
+
+  // Handle error from error boundary
+  const handleErrorBoundaryError = useCallback((error: AnalysisError) => {
+    console.error('Error boundary caught error:', error);
+  }, []);
+
   // Render loading state
-  if (isLoading) {
+  if (loadingState?.isLoading) {
     return (
       <div className={`single-jar-dashboard ${className}`}>
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
-          <div className="flex items-center justify-center">
-            <div className="flex flex-col items-center space-y-4 max-w-md text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-              <div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                  Analyzing Dependencies
-                </h3>
-                <p className="text-gray-600 dark:text-gray-400">
-                  Please wait while we analyze the dependency structure of your JAR file...
-                </p>
+        <LoadingIndicator
+          loadingState={loadingState}
+          error={error}
+          onCancel={loadingState.canCancel ? handleCancel : undefined}
+          onRetry={canRetry ? handleRetry : undefined}
+        />
+      </div>
+    );
+  }
+
+  // Render error state (only if no partial data available)
+  if (error && !partialResult && !analysisData) {
+    return (
+      <div className={`single-jar-dashboard ${className}`}>
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
+          <div className="flex items-start space-x-3">
+            <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-lg font-medium text-red-800 dark:text-red-200">
+                Analysis Failed
+              </h3>
+              <p className="mt-2 text-red-700 dark:text-red-300">
+                {error.message}
+              </p>
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                {error.suggestedAction}
+              </p>
+              
+              {error.details?.retryAttempt && (
+                <div className="mt-2 text-sm text-red-600 dark:text-red-400">
+                  Attempt {error.details.retryAttempt} of {error.details.maxAttempts}
+                </div>
+              )}
+              
+              <div className="mt-4 flex space-x-3">
+                {canRetry && (
+                  <button
+                    onClick={handleRetry}
+                    className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Retry Analysis
+                  </button>
+                )}
+                <button
+                  onClick={clearError}
+                  className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Dismiss
+                </button>
               </div>
             </div>
           </div>
@@ -101,38 +167,8 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
     );
   }
 
-  // Render error state
-  if (error) {
-    return (
-      <div className={`single-jar-dashboard ${className}`}>
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
-          <div className="flex items-start space-x-3">
-            <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <h3 className="text-lg font-medium text-red-800 dark:text-red-200">
-                Analysis Failed
-              </h3>
-              <p className="mt-2 text-red-700 dark:text-red-300">
-                {error}
-              </p>
-              <button
-                onClick={() => {
-                  clearError();
-                  loadAnalysis(jarId);
-                }}
-                className="mt-4 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-              >
-                Retry Analysis
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Render empty state
-  if (!analysisData) {
+  if (!analysisData && !partialResult) {
     return (
       <div className={`single-jar-dashboard ${className}`}>
         <div className="flex items-center justify-center h-64">
@@ -144,17 +180,106 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
             <p className="mt-2 text-gray-600 dark:text-gray-400">
               Unable to load dependency analysis for this JAR.
             </p>
+            {canRetry && (
+              <button
+                onClick={handleRetry}
+                className="mt-4 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Try Again
+              </button>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
-  const { dependencyTree, summary, conflicts } = analysisData;
+  const { dependencyTree, summary, conflicts } = analysisData || {};
 
   return (
-    <div className={`single-jar-dashboard ${className} space-y-6`}>
-      {/* Header */}
+    <ErrorBoundary onError={handleErrorBoundaryError}>
+      <div className={`single-jar-dashboard ${className} space-y-6`}>
+        {/* Partial Analysis Warning */}
+        {partialResult && partialResult.hasErrors && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4"
+          >
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                  Partial Analysis Results
+                </h3>
+                <p className="mt-1 text-sm text-yellow-700 dark:text-yellow-300">
+                  Analysis completed with {partialResult.errors.length} issue(s). 
+                  Some features may be limited.
+                </p>
+                {partialResult.degradedFeatures.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                      Limited features: {partialResult.degradedFeatures.join(', ')}
+                    </p>
+                  </div>
+                )}
+                <div className="mt-3 flex space-x-3">
+                  <button
+                    onClick={handleRetry}
+                    className="text-sm bg-yellow-600 text-white px-3 py-1 rounded hover:bg-yellow-700 transition-colors"
+                  >
+                    Retry Full Analysis
+                  </button>
+                  <button
+                    onClick={clearAllErrors}
+                    className="text-sm text-yellow-700 dark:text-yellow-300 hover:text-yellow-900 dark:hover:text-yellow-100"
+                  >
+                    Continue with Available Data
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Multiple Errors Display */}
+        {errors.length > 1 && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4"
+          >
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
+                  Multiple Issues Detected
+                </h3>
+                <div className="mt-2 space-y-1">
+                  {errors.slice(0, 3).map((err, index) => (
+                    <p key={index} className="text-sm text-red-700 dark:text-red-300">
+                      • {err.message}
+                    </p>
+                  ))}
+                  {errors.length > 3 && (
+                    <p className="text-sm text-red-600 dark:text-red-400">
+                      ... and {errors.length - 3} more issues
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={clearAllErrors}
+                  className="mt-2 text-sm text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-100"
+                >
+                  Dismiss All
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Header */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center justify-between">
           <div>
@@ -293,15 +418,36 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
                 </AnimatePresence>
 
                 {/* Dependency Tree */}
-                <DependencyTreeView
-                  dependencyTree={dependencyTree}
-                  searchQuery={searchQuery}
-                  filters={filters}
-                  selectedDependency={selectedDependency}
-                  expandedNodes={expandedNodes}
-                  onDependencySelect={handleDependencySelect}
-                  onNodeToggle={handleNodeToggle}
-                />
+                {dependencyTree ? (
+                  <DependencyTreeView
+                    dependencyTree={dependencyTree}
+                    searchQuery={searchQuery}
+                    filters={filters}
+                    selectedDependency={selectedDependency}
+                    expandedNodes={expandedNodes}
+                    onDependencySelect={handleDependencySelect}
+                    onNodeToggle={handleNodeToggle}
+                  />
+                ) : (
+                  <div className="text-center py-8">
+                    <AlertTriangle className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-gray-100">
+                      Dependency Tree Unavailable
+                    </h3>
+                    <p className="mt-2 text-gray-600 dark:text-gray-400">
+                      Could not build dependency tree structure.
+                    </p>
+                    {canRetry && (
+                      <button
+                        onClick={handleRetry}
+                        className="mt-4 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Retry Analysis
+                      </button>
+                    )}
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -313,10 +459,31 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
               >
-                <ConflictVisualization
-                  conflicts={conflicts || []}
-                  dependencyTree={dependencyTree}
-                />
+                {conflicts && dependencyTree ? (
+                  <ConflictVisualization
+                    conflicts={conflicts}
+                    dependencyTree={dependencyTree}
+                  />
+                ) : (
+                  <div className="text-center py-8">
+                    <AlertTriangle className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-gray-100">
+                      Conflict Analysis Unavailable
+                    </h3>
+                    <p className="mt-2 text-gray-600 dark:text-gray-400">
+                      Could not analyze dependency conflicts.
+                    </p>
+                    {canRetry && (
+                      <button
+                        onClick={handleRetry}
+                        className="mt-4 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Retry Analysis
+                      </button>
+                    )}
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -328,17 +495,39 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
               >
-                <ExportControls
-                  jarId={jarId}
-                  dependencyTree={dependencyTree}
-                  analysisData={analysisData}
-                />
+                {analysisData && dependencyTree ? (
+                  <ExportControls
+                    jarId={jarId}
+                    dependencyTree={dependencyTree}
+                    analysisData={analysisData}
+                  />
+                ) : (
+                  <div className="text-center py-8">
+                    <AlertTriangle className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-gray-100">
+                      Export Unavailable
+                    </h3>
+                    <p className="mt-2 text-gray-600 dark:text-gray-400">
+                      Cannot export data without complete analysis results.
+                    </p>
+                    {canRetry && (
+                      <button
+                        onClick={handleRetry}
+                        className="mt-4 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Retry Analysis
+                      </button>
+                    )}
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </div>
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 };
 

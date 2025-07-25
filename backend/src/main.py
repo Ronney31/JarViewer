@@ -155,11 +155,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    start_time = getattr(app.state, 'start_time', time.time())
     return {
         "status": "healthy",
         "timestamp": time.time(),
         "version": app.version,
-        "uptime": time.time() - app.state.start_time,
+        "uptime": time.time() - start_time,
     }
 
 

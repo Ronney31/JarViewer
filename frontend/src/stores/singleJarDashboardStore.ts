@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { apiService } from '@/services/apiService';
+import { 
+  AnalysisError, 
+  LoadingState, 
+  LoadingStage, 
+  PartialAnalysisResult,
+  ErrorType,
+  AnalysisErrorBuilder
+} from '@/types/errors';
+import { errorHandlingService } from '@/services/errorHandlingService';
 
 // Types for the dashboard state
 interface DependencyNode {
@@ -80,10 +89,12 @@ interface SearchFilters {
 interface SingleJarDashboardState {
   // Data
   analysisData: AnalysisData | null;
+  partialResult: PartialAnalysisResult | null;
   
   // Loading and error states
-  isLoading: boolean;
-  error: string | null;
+  loadingState: LoadingState | null;
+  error: AnalysisError | null;
+  errors: AnalysisError[];
   
   // Search and filtering
   searchQuery: string;
@@ -94,14 +105,21 @@ interface SingleJarDashboardState {
   selectedDependency: string | null;
   expandedNodes: Set<string>;
   
+  // Retry state
+  retryCount: number;
+  canRetry: boolean;
+  
   // Actions
-  loadAnalysis: (jarId: string) => Promise<void>;
+  loadAnalysis: (jarId: string, forceRetry?: boolean) => Promise<void>;
+  cancelAnalysis: (jarId: string) => void;
+  retryAnalysis: (jarId: string) => Promise<void>;
   setSearchQuery: (query: string) => void;
   setFilters: (filters: SearchFilters) => void;
   setSelectedDependency: (dependencyId: string | null) => void;
   toggleNodeExpansion: (nodeId: string) => void;
   searchDependencies: (query: string, filters?: SearchFilters) => Promise<void>;
   clearError: () => void;
+  clearAllErrors: () => void;
   reset: () => void;
 }
 
@@ -110,49 +128,189 @@ export const useSingleJarDashboardStore = create<SingleJarDashboardState>()(
     (set, get) => ({
       // Initial state
       analysisData: null,
-      isLoading: false,
+      partialResult: null,
+      loadingState: null,
       error: null,
+      errors: [],
       searchQuery: '',
       filters: {},
       searchResults: [],
       selectedDependency: null,
       expandedNodes: new Set(),
+      retryCount: 0,
+      canRetry: false,
 
-      // Load comprehensive analysis data
-      loadAnalysis: async (jarId: string) => {
-        set({ isLoading: true, error: null });
+      // Load comprehensive analysis data with enhanced error handling
+      loadAnalysis: async (jarId: string, forceRetry: boolean = false) => {
+        const startTime = new Date();
+        let currentStage = LoadingStage.INITIALIZING;
         
         try {
-          // Load comprehensive analysis
+          // Clear previous errors if not retrying
+          if (!forceRetry) {
+            set({ 
+              error: null, 
+              errors: [], 
+              partialResult: null,
+              retryCount: 0
+            });
+          }
+
+          // Initialize loading state
+          errorHandlingService.updateLoadingState(
+            jarId, 
+            LoadingStage.INITIALIZING, 
+            0, 
+            startTime
+          );
+          
+          set({ 
+            loadingState: errorHandlingService.getLoadingState(jarId),
+            canRetry: false
+          });
+
+          // Stage 1: Extract dependencies
+          currentStage = LoadingStage.EXTRACTING_DEPENDENCIES;
+          errorHandlingService.updateLoadingState(jarId, currentStage, 20, startTime);
+          set({ loadingState: errorHandlingService.getLoadingState(jarId) });
+
           const response = await apiService.get(`/api/v1/jars/${jarId}/analysis/comprehensive`);
           
           if (!response.success) {
             throw new Error(response.error || 'Failed to load analysis');
           }
-          
+
+          // Stage 2: Building tree
+          currentStage = LoadingStage.BUILDING_TREE;
+          errorHandlingService.updateLoadingState(jarId, currentStage, 50, startTime);
+          set({ loadingState: errorHandlingService.getLoadingState(jarId) });
+
           const analysisData: AnalysisData = response.data;
           
+          // Check for partial failures
+          const errors: AnalysisError[] = [];
+          const availableData = {
+            dependencyTree: !!analysisData.dependencyTree,
+            conflicts: !!analysisData.conflicts,
+            summary: !!analysisData.summary,
+            searchIndex: true, // We can always build search from available data
+            export: !!analysisData.dependencyTree
+          };
+
+          // Stage 3: Detecting conflicts
+          currentStage = LoadingStage.DETECTING_CONFLICTS;
+          errorHandlingService.updateLoadingState(jarId, currentStage, 70, startTime);
+          set({ loadingState: errorHandlingService.getLoadingState(jarId) });
+
+          // Validate data integrity
+          if (!analysisData.dependencyTree?.root_dependencies) {
+            errors.push(
+              AnalysisErrorBuilder.create()
+                .type(ErrorType.DEPENDENCY_EXTRACTION_FAILED)
+                .message('Could not extract dependency tree structure')
+                .suggestedAction('The JAR may not contain standard dependency information')
+                .retryable(true)
+                .context({ jarId, operation: 'dependency_extraction' })
+                .build()
+            );
+            availableData.dependencyTree = false;
+            availableData.export = false;
+          }
+
+          if (!analysisData.conflicts || analysisData.conflicts.length === 0) {
+            // This might not be an error - just no conflicts found
+            if (analysisData.dependencyTree?.root_dependencies?.length > 5) {
+              // Only flag as potential error if we have many dependencies but no conflicts detected
+              errors.push(
+                AnalysisErrorBuilder.create()
+                  .type(ErrorType.CONFLICT_DETECTION_FAILED)
+                  .message('Conflict detection may be incomplete')
+                  .suggestedAction('Conflict analysis may have missed some issues')
+                  .retryable(true)
+                  .context({ jarId, operation: 'conflict_detection' })
+                  .build()
+              );
+            }
+          }
+
+          // Stage 4: Building search index
+          currentStage = LoadingStage.BUILDING_SEARCH_INDEX;
+          errorHandlingService.updateLoadingState(jarId, currentStage, 85, startTime);
+          set({ loadingState: errorHandlingService.getLoadingState(jarId) });
+
           // Initialize expanded nodes with root dependencies
           const expandedNodes = new Set<string>();
-          if (analysisData.dependencyTree.root_dependencies) {
+          if (analysisData.dependencyTree?.root_dependencies) {
             analysisData.dependencyTree.root_dependencies.forEach(dep => {
               expandedNodes.add(dep.id);
             });
           }
-          
-          set({ 
-            analysisData,
-            isLoading: false,
-            expandedNodes
-          });
+
+          // Stage 5: Finalizing
+          currentStage = LoadingStage.FINALIZING;
+          errorHandlingService.updateLoadingState(jarId, currentStage, 95, startTime);
+          set({ loadingState: errorHandlingService.getLoadingState(jarId) });
+
+          // Complete
+          errorHandlingService.updateLoadingState(jarId, LoadingStage.COMPLETE, 100, startTime);
+
+          if (errors.length > 0) {
+            // Partial success
+            const partialResult = errorHandlingService.handlePartialFailure(jarId, errors, availableData);
+            set({ 
+              analysisData,
+              partialResult,
+              errors,
+              loadingState: null,
+              expandedNodes,
+              canRetry: true
+            });
+          } else {
+            // Complete success
+            set({ 
+              analysisData,
+              partialResult: null,
+              errors: [],
+              loadingState: null,
+              expandedNodes,
+              canRetry: false
+            });
+          }
           
         } catch (error) {
           console.error('Failed to load analysis:', error);
+          
+          const analysisError = await errorHandlingService.handleApiError(
+            error,
+            { jarId, operation: 'comprehensive_analysis' }
+          );
+          
           set({ 
-            error: error instanceof Error ? error.message : 'Failed to load analysis',
-            isLoading: false 
+            error: analysisError,
+            errors: [analysisError],
+            loadingState: null,
+            canRetry: analysisError.retryable,
+            retryCount: get().retryCount + 1
           });
+          
+          errorHandlingService.clearLoadingState(jarId);
         }
+      },
+
+      // Cancel analysis
+      cancelAnalysis: (jarId: string) => {
+        errorHandlingService.clearLoadingState(jarId);
+        errorHandlingService.clearRetryState(jarId);
+        set({ 
+          loadingState: null,
+          canRetry: false
+        });
+      },
+
+      // Retry analysis
+      retryAnalysis: async (jarId: string) => {
+        const { loadAnalysis } = get();
+        await loadAnalysis(jarId, true);
       },
 
       // Set search query and trigger search
@@ -292,22 +450,41 @@ export const useSingleJarDashboardStore = create<SingleJarDashboardState>()(
         }
       },
 
-      // Clear error
+      // Clear current error
       clearError: () => {
         set({ error: null });
       },
 
+      // Clear all errors
+      clearAllErrors: () => {
+        set({ 
+          error: null, 
+          errors: [],
+          partialResult: null
+        });
+      },
+
       // Reset state
       reset: () => {
+        const state = get();
+        if (state.analysisData?.dependencyTree?.jar_id) {
+          errorHandlingService.clearLoadingState(state.analysisData.dependencyTree.jar_id);
+          errorHandlingService.clearRetryState(state.analysisData.dependencyTree.jar_id);
+        }
+        
         set({
           analysisData: null,
-          isLoading: false,
+          partialResult: null,
+          loadingState: null,
           error: null,
+          errors: [],
           searchQuery: '',
           filters: {},
           searchResults: [],
           selectedDependency: null,
-          expandedNodes: new Set()
+          expandedNodes: new Set(),
+          retryCount: 0,
+          canRetry: false
         });
       }
     }),

@@ -39,22 +39,26 @@ export function Header({ currentJar, viewMode = 'files', onViewModeChange }: Hea
             className={`flex items-center space-x-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
               viewMode === 'files'
                 ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
             }`}
+            title="Browse JAR file structure and view individual files (Alt+1)"
           >
             <Code2 className="w-4 h-4" />
-            <span>File Structure</span>
+            <span className="hidden sm:inline">File Structure</span>
+            <span className="sm:hidden">Files</span>
           </button>
           <button
             onClick={() => onViewModeChange('dependencies')}
             className={`flex items-center space-x-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
               viewMode === 'dependencies'
                 ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
             }`}
+            title="Analyze JAR dependencies, conflicts, and export data (Alt+2)"
           >
             <Package className="w-4 h-4" />
-            <span>Analyze Dependencies</span>
+            <span className="hidden sm:inline">Dependency Analysis</span>
+            <span className="sm:hidden">Dependencies</span>
           </button>
         </div>
       )}

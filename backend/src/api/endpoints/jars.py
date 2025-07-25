@@ -293,26 +293,167 @@ async def analyze_dependencies(jar_id: str) -> JSONResponse:
 
 @router.get("/{jar_id}/analysis/comprehensive")
 async def analyze_comprehensive_dependencies(jar_id: str) -> JSONResponse:
-    """Get comprehensive dependency analysis for project decision-making."""
+    """Get comprehensive dependency analysis for project decision-making with enhanced error handling."""
+    
+    from ...utils.error_handling import (
+        AnalysisError, ErrorType, ErrorSeverity, AnalysisErrorBuilder,
+        PartialAnalysisResult, handle_partial_analysis_failure,
+        with_error_handling, RetryConfig
+    )
+    
+    @with_error_handling(
+        "comprehensive_dependency_analysis",
+        RetryConfig(max_attempts=2, base_delay=1.0)
+    )
+    async def perform_analysis():
+        return await jar_service.analyze_comprehensive_dependencies(jar_id)
     
     try:
-        comprehensive_result = await jar_service.analyze_comprehensive_dependencies(jar_id)
+        logger.info("Starting comprehensive dependency analysis", jar_id=jar_id)
         
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "data": comprehensive_result
-            }
-        )
+        # Check if JAR exists first
+        if jar_id not in jar_service.active_jars:
+            error = AnalysisErrorBuilder.create()\
+                .type(ErrorType.JAR_NOT_FOUND)\
+                .severity(ErrorSeverity.HIGH)\
+                .message("JAR file not found or has been removed")\
+                .suggested_action("Please upload the JAR file again")\
+                .retryable(False)\
+                .context({"jar_id": jar_id, "operation": "comprehensive_analysis"})\
+                .build()
+            
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "error": error.to_dict(),
+                    "partial_result": None
+                }
+            )
         
-    except JarProcessingError as e:
-        logger.error("Comprehensive dependency analysis failed", jar_id=jar_id, error=str(e))
-        raise HTTPException(status_code=404, detail=str(e))
+        # Perform comprehensive analysis with error handling
+        comprehensive_result = await perform_analysis()
+        
+        # Check for partial failures
+        errors = []
+        available_data = {
+            'dependency_tree': bool(comprehensive_result.get('dependencyTree')),
+            'conflicts': bool(comprehensive_result.get('conflicts')),
+            'summary': bool(comprehensive_result.get('summary')),
+            'search_index': True,  # We can build this from available data
+            'export': bool(comprehensive_result.get('dependencyTree'))
+        }
+        
+        # Validate critical components
+        if not comprehensive_result.get('dependencyTree'):
+            errors.append(
+                AnalysisErrorBuilder.create()
+                .type(ErrorType.DEPENDENCY_EXTRACTION_FAILED)
+                .severity(ErrorSeverity.HIGH)
+                .message("Could not extract dependency tree structure")
+                .suggested_action("The JAR may not contain standard dependency information")
+                .retryable(True)
+                .context({"jar_id": jar_id, "operation": "dependency_extraction"})
+                .build()
+            )
+        
+        if not comprehensive_result.get('conflicts') and comprehensive_result.get('dependencyTree', {}).get('total_dependencies', 0) > 5:
+            errors.append(
+                AnalysisErrorBuilder.create()
+                .type(ErrorType.CONFLICT_DETECTION_FAILED)
+                .severity(ErrorSeverity.MEDIUM)
+                .message("Conflict detection may be incomplete")
+                .suggested_action("Some dependency conflicts may not have been detected")
+                .retryable(True)
+                .context({"jar_id": jar_id, "operation": "conflict_detection"})
+                .build()
+            )
+        
+        if not comprehensive_result.get('summary'):
+            errors.append(
+                AnalysisErrorBuilder.create()
+                .type(ErrorType.PARTIAL_ANALYSIS_FAILURE)
+                .severity(ErrorSeverity.MEDIUM)
+                .message("Analysis summary could not be generated")
+                .suggested_action("Basic analysis data is available but summary is missing")
+                .retryable(True)
+                .context({"jar_id": jar_id, "operation": "summary_generation"})
+                .build()
+            )
+        
+        # Return results
+        if errors:
+            # Partial success
+            partial_result = handle_partial_analysis_failure(errors, comprehensive_result)
+            
+            logger.warning(
+                "Comprehensive analysis completed with errors",
+                jar_id=jar_id,
+                error_count=len(errors),
+                available_features=list(k for k, v in available_data.items() if v)
+            )
+            
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "data": comprehensive_result,
+                    "partial_result": partial_result.to_dict(),
+                    "has_errors": True,
+                    "errors": [error.to_dict() for error in errors]
+                }
+            )
+        else:
+            # Complete success
+            logger.info("Comprehensive analysis completed successfully", jar_id=jar_id)
+            
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "data": comprehensive_result,
+                    "partial_result": None,
+                    "has_errors": False,
+                    "errors": []
+                }
+            )
         
     except Exception as e:
-        logger.error("Comprehensive dependency analysis error", jar_id=jar_id, error=str(e))
-        raise HTTPException(status_code=500, detail="Comprehensive dependency analysis failed")
+        logger.error("Comprehensive dependency analysis failed", jar_id=jar_id, error=str(e))
+        
+        # Create structured error response
+        if isinstance(e, JarProcessingError):
+            error = AnalysisErrorBuilder.create()\
+                .type(ErrorType.JAR_PROCESSING_ERROR)\
+                .severity(ErrorSeverity.HIGH)\
+                .message(str(e))\
+                .suggested_action("Please check the JAR file and try again")\
+                .retryable(False)\
+                .context({"jar_id": jar_id, "operation": "comprehensive_analysis"})\
+                .build()
+            status_code = 422
+        else:
+            error = AnalysisErrorBuilder.create()\
+                .type(ErrorType.UNKNOWN_ERROR)\
+                .severity(ErrorSeverity.HIGH)\
+                .message("Comprehensive dependency analysis failed unexpectedly")\
+                .suggested_action("Please try again or contact support if the problem persists")\
+                .retryable(True)\
+                .context({"jar_id": jar_id, "operation": "comprehensive_analysis"})\
+                .details({"exception_type": type(e).__name__, "exception_message": str(e)})\
+                .build()
+            status_code = 500
+        
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "success": False,
+                "error": error.to_dict(),
+                "partial_result": None,
+                "has_errors": True,
+                "errors": [error.to_dict()]
+            }
+        )
 
 
 @router.get("/{jar_id}/analysis/versions")
