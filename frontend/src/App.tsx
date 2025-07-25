@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Toaster } from 'react-hot-toast'
 import { ThemeProvider } from './components/ThemeProvider'
 import { Header } from './components/Header'
@@ -7,8 +7,11 @@ import { FileTree } from './components/FileTree'
 import { CodeViewer } from './components/CodeViewer'
 import { MetadataPanel } from './components/MetadataPanel'
 import { StatusBar } from './components/StatusBar'
+import DependencyDashboard from './components/DependencyDashboard'
 import { useJarViewerStore } from './stores/jarViewerStore'
 import './index.css'
+
+type ViewMode = 'files' | 'dependencies';
 
 function App() {
   console.log('🚀 JarViewer: Full application rendering...')
@@ -24,12 +27,18 @@ function App() {
     clearError
   } = useJarViewerStore()
 
+  const [viewMode, setViewMode] = useState<ViewMode>('files')
+
   return (
     <ThemeProvider>
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         {/* Header */}
         <div className="fixed top-0 left-0 right-0 z-50">
-          <Header />
+          <Header 
+            currentJar={currentJar}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
         </div>
 
         {/* Main Content Area */}
@@ -94,6 +103,25 @@ function App() {
 
           {/* Main Content */}
           <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Navigation Bar for Dependency Dashboard */}
+            {viewMode === 'dependencies' && currentJar && (
+              <div className="flex items-center justify-between p-4 border-b bg-gray-50 dark:bg-gray-800">
+                <button
+                  onClick={() => setViewMode('files')}
+                  className="flex items-center px-3 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Back to Files
+                </button>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Dependency Analysis - {currentJar.name}
+                </h2>
+                <div></div>
+              </div>
+            )}
+            
             {/* Content Area */}
             <div className="flex-1 overflow-hidden">
               {!currentJar ? (
@@ -117,6 +145,11 @@ function App() {
                     </div>
                   </div>
                 </div>
+              ) : viewMode === 'dependencies' ? (
+                <DependencyDashboard 
+                  jarId={currentJar.id} 
+                  isVisible={true}
+                />
               ) : selectedFile ? (
                 <CodeViewer />
               ) : (
@@ -131,7 +164,7 @@ function App() {
                     <p className="text-muted-foreground mb-4">
                       Choose a file from the tree on the left to view its contents
                     </p>
-                    <div className="bg-card p-3 rounded-lg border text-sm">
+                    <div className="bg-card p-3 rounded-lg border text-sm mb-4">
                       <p className="text-muted-foreground">
                         <strong>JAR loaded:</strong> {currentJar.name}<br/>
                         <strong>Files:</strong> {currentJar.stats.totalFiles} files, {currentJar.stats.totalDirectories} directories

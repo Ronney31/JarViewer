@@ -17,6 +17,11 @@ from ..models.jar import (
     ProcessingProgress, FileContent, SearchResult, DecompilationResult
 )
 from ..core.config import get_settings
+from .version_extraction_service import version_extraction_service, ExtractedVersions
+from .sbom_service import sbom_service, SBOMFormat, GeneratedSBOM
+from .conflict_detection_service import conflict_detection_service, ConflictAnalysisResult
+from .comprehensive_dependency_service import comprehensive_dependency_service, ComprehensiveDependencyReport
+from .dependency_tree_service import dependency_tree_service
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -667,6 +672,722 @@ class JarService:
                         jar_id=jar_id, 
                         error=str(e))
             raise JarProcessingError(f"Dependency analysis failed: {str(e)}")
+    
+    async def build_dependency_tree(self, jar_id: str) -> Dict[str, Any]:
+        """Build hierarchical dependency tree for the JAR."""
+        if jar_id not in self.active_jars:
+            raise JarProcessingError("JAR not found")
+        
+        jar_file = self.active_jars[jar_id]
+        
+        try:
+            logger.info("Building dependency tree", jar_id=jar_id)
+            
+            # Build dependency tree
+            dependency_tree = await dependency_tree_service.build_dependency_tree(
+                jar_id=jar_id,
+                jar_path=Path(jar_file.temp_path)
+            )
+            
+            # Create analysis report
+            analysis_report = dependency_tree_service.create_analysis_report(dependency_tree)
+            
+            # Convert to serializable format
+            serialized_result = {
+                "tree": {
+                    "id": dependency_tree.id,
+                    "jar_id": dependency_tree.jar_id,
+                    "total_dependencies": dependency_tree.total_dependencies,
+                    "direct_dependencies": dependency_tree.direct_dependencies,
+                    "transitive_dependencies": dependency_tree.transitive_dependencies,
+                    "max_depth": dependency_tree.max_depth,
+                    "scope_counts": {scope.value: count for scope, count in dependency_tree.scope_counts.items()},
+                    "source_counts": {source.value: count for source, count in dependency_tree.source_counts.items()},
+                    "root_dependencies": [
+                        self._serialize_dependency_node(dep) for dep in dependency_tree.root_dependencies
+                    ],
+                    "conflicts": [
+                        {
+                            "id": conflict.id,
+                            "conflict_type": conflict.conflict_type.value,
+                            "affected_dependencies": conflict.affected_dependencies,
+                            "description": conflict.description,
+                            "severity": conflict.severity,
+                            "resolution_suggestion": conflict.resolution_suggestion,
+                            "conflicting_versions": conflict.conflicting_versions,
+                            "winning_version": conflict.winning_version,
+                            "paths": conflict.paths
+                        }
+                        for conflict in dependency_tree.conflicts
+                    ],
+                    "paths": [
+                        {
+                            "target_dependency_id": path.target_dependency_id,
+                            "path": path.path,
+                            "depth": path.depth,
+                            "path_string": path.path_string
+                        }
+                        for path in dependency_tree.paths
+                    ]
+                },
+                "analysis": {
+                    "id": analysis_report.id,
+                    "created_at": analysis_report.created_at.isoformat(),
+                    "summary": analysis_report.summary,
+                    "security_risks": analysis_report.security_risks,
+                    "license_risks": analysis_report.license_risks,
+                    "outdated_dependencies": analysis_report.outdated_dependencies,
+                    "recommendations": analysis_report.recommendations
+                }
+            }
+            
+            logger.info("Dependency tree built successfully", 
+                       jar_id=jar_id,
+                       total_deps=dependency_tree.total_dependencies,
+                       conflicts=len(dependency_tree.conflicts))
+            
+            return serialized_result
+            
+        except Exception as e:
+            logger.error("Dependency tree building failed", 
+                        jar_id=jar_id, 
+                        error=str(e))
+            raise JarProcessingError(f"Dependency tree building failed: {str(e)}")
+    
+    def _serialize_dependency_node(self, node) -> Dict[str, Any]:
+        """Serialize a dependency node to dictionary format."""
+        return {
+            "id": node.id,
+            "group_id": node.group_id,
+            "artifact_id": node.artifact_id,
+            "version": node.version,
+            "scope": node.scope.value,
+            "source": node.source.value,
+            "optional": node.optional,
+            "parent_id": node.parent_id,
+            "description": node.description,
+            "license": node.license,
+            "size_bytes": node.size_bytes,
+            "file_path": node.file_path,
+            "is_transitive": node.is_transitive,
+            "depth": node.depth,
+            "resolved_version": node.resolved_version,
+            "coordinate": node.coordinate,
+            "name": node.name,
+            "children": [
+                self._serialize_dependency_node(child) for child in node.children
+            ]
+        }
+
+    async def extract_all_versions(self, jar_id: str) -> ExtractedVersions:
+        """Extract comprehensive version information from JAR."""
+        if jar_id not in self.active_jars:
+            raise JarProcessingError(f"JAR {jar_id} not found")
+        
+        jar_file = self.active_jars[jar_id]
+        temp_path = Path(jar_file.temp_path)
+        
+        logger.info("Starting comprehensive version extraction", jar_id=jar_id)
+        
+        try:
+            extracted_versions = await version_extraction_service.extract_all_versions(temp_path)
+            
+            logger.info("Version extraction completed", 
+                       jar_id=jar_id,
+                       total_versions=len(extracted_versions.versions),
+                       frameworks=len(extracted_versions.framework_versions))
+            
+            return extracted_versions
+            
+        except Exception as e:
+            logger.error("Version extraction failed", 
+                        jar_id=jar_id, 
+                        error=str(e))
+            raise JarProcessingError(f"Version extraction failed: {str(e)}")
+
+    async def analyze_dependency_conflicts(self, jar_id: str) -> ConflictAnalysisResult:
+        """Analyze dependency conflicts and provide resolution recommendations."""
+        if jar_id not in self.active_jars:
+            raise JarProcessingError(f"JAR {jar_id} not found")
+        
+        logger.info("Starting dependency conflict analysis", jar_id=jar_id)
+        
+        try:
+            # Get comprehensive version information
+            extracted_versions = await self.extract_all_versions(jar_id)
+            
+            # Get dependency analysis
+            dependency_analysis = await self._get_dependency_analysis_result(jar_id)
+            
+            # Perform conflict analysis
+            conflict_result = await conflict_detection_service.analyze_conflicts(
+                extracted_versions, dependency_analysis
+            )
+            
+            logger.info("Conflict analysis completed", 
+                       jar_id=jar_id,
+                       total_conflicts=len(conflict_result.conflicts),
+                       conflicted_dependencies=conflict_result.conflicted_dependencies)
+            
+            return conflict_result
+            
+        except Exception as e:
+            logger.error("Conflict analysis failed", 
+                        jar_id=jar_id, 
+                        error=str(e))
+            raise JarProcessingError(f"Conflict analysis failed: {str(e)}")
+
+    async def generate_sbom(self, jar_id: str, format: str = "cyclonedx") -> GeneratedSBOM:
+        """Generate Software Bill of Materials (SBOM) for the JAR."""
+        if jar_id not in self.active_jars:
+            raise JarProcessingError(f"JAR {jar_id} not found")
+        
+        jar_file = self.active_jars[jar_id]
+        
+        logger.info("Starting SBOM generation", jar_id=jar_id, format=format)
+        
+        try:
+            # Get comprehensive analysis data
+            extracted_versions = await self.extract_all_versions(jar_id)
+            dependency_analysis = await self._get_dependency_analysis_result(jar_id)
+            
+            # Determine SBOM format
+            sbom_format = SBOMFormat.CYCLONE_DX if format.lower() == "cyclonedx" else SBOMFormat.SPDX
+            
+            # Generate SBOM
+            sbom_result = await sbom_service.generate_sbom(
+                jar_file.name,
+                extracted_versions,
+                dependency_analysis,
+                sbom_format
+            )
+            
+            logger.info("SBOM generation completed", 
+                       jar_id=jar_id,
+                       format=format,
+                       components=sbom_result.components_count,
+                       size=sbom_result.file_size)
+            
+            return sbom_result
+            
+        except Exception as e:
+            logger.error("SBOM generation failed", 
+                        jar_id=jar_id, 
+                        error=str(e))
+            raise JarProcessingError(f"SBOM generation failed: {str(e)}")
+
+    async def export_sbom(
+        self, 
+        jar_id: str, 
+        format: str = "cyclonedx", 
+        export_format: str = "json"
+    ) -> Dict[str, Any]:
+        """Export SBOM to downloadable file."""
+        if jar_id not in self.active_jars:
+            raise JarProcessingError(f"JAR {jar_id} not found")
+        
+        logger.info("Starting SBOM export", 
+                   jar_id=jar_id, 
+                   format=format, 
+                   export_format=export_format)
+        
+        try:
+            # Generate SBOM
+            sbom_result = await self.generate_sbom(jar_id, format)
+            
+            # Create export directory
+            export_dir = self.temp_base_dir / "exports" / jar_id
+            export_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Export SBOM
+            export_path = await sbom_service.export_sbom(
+                sbom_result, export_dir, export_format
+            )
+            
+            # Calculate file size
+            file_size = export_path.stat().st_size
+            
+            logger.info("SBOM export completed", 
+                       jar_id=jar_id,
+                       export_path=str(export_path),
+                       file_size=file_size)
+            
+            return {
+                "filename": export_path.name,
+                "file_path": str(export_path),
+                "file_size": file_size,
+                "format": format,
+                "export_format": export_format
+            }
+            
+        except Exception as e:
+            logger.error("SBOM export failed", 
+                        jar_id=jar_id, 
+                        error=str(e))
+            raise JarProcessingError(f"SBOM export failed: {str(e)}")
+
+    async def analyze_comprehensive_dependencies(self, jar_id: str) -> Dict[str, Any]:
+        """Perform comprehensive dependency analysis for project decision-making."""
+        if jar_id not in self.active_jars:
+            raise JarProcessingError(f"JAR {jar_id} not found")
+        
+        jar_file = self.active_jars[jar_id]
+        temp_path = Path(jar_file.temp_path)
+        
+        logger.info("Starting comprehensive dependency analysis", jar_id=jar_id)
+        
+        try:
+            # Get comprehensive analysis
+            report = await comprehensive_dependency_service.analyze_comprehensive_dependencies(
+                temp_path, jar_file.size
+            )
+            
+            # Convert to serializable format
+            result = {
+                "maven_dependencies": [
+                    {
+                        "name": dep.name,
+                        "version": dep.version,
+                        "group_id": dep.group_id,
+                        "artifact_id": dep.artifact_id,
+                        "type": dep.type,
+                        "source": dep.source,
+                        "description": dep.description,
+                        "license": dep.license,
+                        "class_count": dep.class_count
+                    }
+                    for dep in report.maven_dependencies
+                ],
+                "gradle_dependencies": [
+                    {
+                        "name": dep.name,
+                        "version": dep.version,
+                        "group_id": dep.group_id,
+                        "artifact_id": dep.artifact_id,
+                        "type": dep.type,
+                        "source": dep.source,
+                        "description": dep.description,
+                        "license": dep.license,
+                        "class_count": dep.class_count
+                    }
+                    for dep in report.gradle_dependencies
+                ],
+                "detected_libraries": [
+                    {
+                        "name": dep.name,
+                        "version": dep.version,
+                        "group_id": dep.group_id,
+                        "artifact_id": dep.artifact_id,
+                        "type": dep.type,
+                        "source": dep.source,
+                        "description": dep.description,
+                        "license": dep.license,
+                        "class_count": dep.class_count
+                    }
+                    for dep in report.detected_libraries
+                ],
+                "frameworks": [
+                    {
+                        "name": fw.name,
+                        "version": fw.version,
+                        "confidence": fw.confidence,
+                        "components": fw.components,
+                        "description": fw.description
+                    }
+                    for fw in report.frameworks
+                ],
+                "java_version": report.java_version,
+                "build_tool": report.build_tool,
+                "top_packages": report.top_packages,
+                "external_packages": report.external_packages,
+                "statistics": {
+                    "total_dependencies": report.total_dependencies,
+                    "total_classes": report.total_classes,
+                    "total_packages": report.total_packages,
+                    "jar_size_mb": report.jar_size_mb
+                },
+                "risk_assessment": {
+                    "outdated_dependencies": report.outdated_dependencies,
+                    "security_concerns": report.security_concerns,
+                    "license_info": report.license_info
+                },
+                "summary": {
+                    "decision_factors": self._generate_decision_factors(report),
+                    "compatibility_score": self._calculate_compatibility_score(report),
+                    "recommendation": self._generate_recommendation(report)
+                }
+            }
+            
+            logger.info("Comprehensive dependency analysis completed", 
+                       jar_id=jar_id,
+                       total_dependencies=report.total_dependencies,
+                       frameworks=len(report.frameworks))
+            
+            return result
+            
+        except Exception as e:
+            logger.error("Comprehensive dependency analysis failed", 
+                        jar_id=jar_id, 
+                        error=str(e))
+            raise JarProcessingError(f"Comprehensive dependency analysis failed: {str(e)}")
+
+    def _generate_decision_factors(self, report: ComprehensiveDependencyReport) -> List[str]:
+        """Generate decision factors for using this JAR."""
+        factors = []
+        
+        # Positive factors
+        if report.frameworks:
+            factors.append(f"✅ Uses established frameworks: {', '.join([fw.name for fw in report.frameworks[:3]])}")
+        
+        if report.build_tool:
+            factors.append(f"✅ Built with {report.build_tool} (standard build tool)")
+        
+        if report.java_version:
+            factors.append(f"✅ Built with Java {report.java_version}")
+        
+        if report.total_dependencies < 20:
+            factors.append("✅ Lightweight - few external dependencies")
+        
+        # Warning factors
+        if report.outdated_dependencies:
+            factors.append(f"⚠️ Contains {len(report.outdated_dependencies)} potentially outdated dependencies")
+        
+        if report.security_concerns:
+            factors.append(f"⚠️ {len(report.security_concerns)} potential security concerns")
+        
+        if report.total_dependencies > 50:
+            factors.append("⚠️ Heavy - many external dependencies")
+        
+        if report.jar_size_mb > 50:
+            factors.append(f"⚠️ Large JAR size ({report.jar_size_mb} MB)")
+        
+        return factors
+
+    def _calculate_compatibility_score(self, report: ComprehensiveDependencyReport) -> int:
+        """Calculate compatibility score (0-100)."""
+        score = 70  # Base score
+        
+        # Positive factors
+        if report.build_tool in ['Maven', 'Gradle']:
+            score += 10
+        
+        if report.frameworks:
+            score += 5
+        
+        if len(report.outdated_dependencies) == 0:
+            score += 10
+        
+        if len(report.security_concerns) == 0:
+            score += 10
+        
+        # Negative factors
+        if len(report.outdated_dependencies) > 5:
+            score -= 15
+        
+        if len(report.security_concerns) > 0:
+            score -= 20
+        
+        if report.total_dependencies > 100:
+            score -= 10
+        
+        return max(0, min(100, score))
+
+    def _generate_recommendation(self, report: ComprehensiveDependencyReport) -> str:
+        """Generate usage recommendation."""
+        score = self._calculate_compatibility_score(report)
+        
+        if score >= 80:
+            return "✅ RECOMMENDED - This JAR appears safe and well-maintained for use in projects"
+        elif score >= 60:
+            return "⚠️ USE WITH CAUTION - Review the warnings before using in production"
+        else:
+            return "❌ NOT RECOMMENDED - Significant concerns found, consider alternatives"
+
+    async def get_complete_analysis(self, jar_id: str) -> Dict[str, Any]:
+        """Get complete comprehensive analysis combining all analysis types."""
+        if jar_id not in self.active_jars:
+            raise JarProcessingError(f"JAR {jar_id} not found")
+        
+        jar_file = self.active_jars[jar_id]
+        
+        logger.info("Starting complete comprehensive analysis", jar_id=jar_id)
+        
+        try:
+            # Run all analyses in parallel for better performance
+            import asyncio
+            
+            # Gather all analysis results
+            results = await asyncio.gather(
+                self.analyze_comprehensive_dependencies(jar_id),
+                self.extract_all_versions(jar_id),
+                self.analyze_dependency_conflicts(jar_id),
+                self.analyze_dependencies(jar_id),
+                self.generate_sbom(jar_id, "cyclonedx"),
+                return_exceptions=True
+            )
+            
+            # Extract results and handle any exceptions
+            comprehensive_deps = results[0] if not isinstance(results[0], Exception) else None
+            version_analysis = results[1] if not isinstance(results[1], Exception) else None
+            conflict_analysis = results[2] if not isinstance(results[2], Exception) else None
+            dependency_analysis = results[3] if not isinstance(results[3], Exception) else None
+            sbom_result = results[4] if not isinstance(results[4], Exception) else None
+            
+            # Build complete analysis response
+            complete_analysis = {
+                "jar_info": {
+                    "id": jar_file.id,
+                    "name": jar_file.name,
+                    "size": jar_file.size,
+                    "uploaded_at": jar_file.uploaded_at.isoformat(),
+                    "stats": jar_file.stats.model_dump(mode='json')
+                },
+                "comprehensive_dependencies": comprehensive_deps,
+                "version_analysis": self._serialize_version_analysis(version_analysis) if version_analysis else None,
+                "conflict_analysis": self._serialize_conflict_analysis(conflict_analysis) if conflict_analysis else None,
+                "dependency_analysis": dependency_analysis,
+                "sbom": self._serialize_sbom_result(sbom_result) if sbom_result else None,
+                "analysis_summary": self._generate_analysis_summary(
+                    comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis
+                ),
+                "recommendations": self._generate_complete_recommendations(
+                    comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis
+                ),
+                "risk_assessment": self._generate_risk_assessment(
+                    comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis
+                )
+            }
+            
+            logger.info("Complete comprehensive analysis completed", jar_id=jar_id)
+            
+            return complete_analysis
+            
+        except Exception as e:
+            logger.error("Complete comprehensive analysis failed", 
+                        jar_id=jar_id, 
+                        error=str(e))
+            raise JarProcessingError(f"Complete comprehensive analysis failed: {str(e)}")
+
+    def _serialize_version_analysis(self, version_analysis) -> Dict[str, Any]:
+        """Serialize version analysis result."""
+        return {
+            "versions": [
+                {
+                    "name": v.name,
+                    "version": v.version,
+                    "group_id": v.group_id,
+                    "artifact_id": v.artifact_id,
+                    "source": v.source,
+                    "source_file": v.source_file,
+                    "confidence": v.confidence
+                } for v in version_analysis.versions
+            ],
+            "manifest_info": version_analysis.manifest_info,
+            "build_info": version_analysis.build_info,
+            "framework_versions": version_analysis.framework_versions,
+            "total_versions": len(version_analysis.versions)
+        }
+
+    def _serialize_conflict_analysis(self, conflict_analysis) -> Dict[str, Any]:
+        """Serialize conflict analysis result."""
+        return {
+            "conflicts": [
+                {
+                    "conflict_type": c.conflict_type.value,
+                    "severity": c.severity.value,
+                    "title": c.title,
+                    "description": c.description,
+                    "conflicted_dependencies": [
+                        {
+                            "name": dep.name,
+                            "version": dep.version,
+                            "source": dep.source,
+                            "source_file": dep.source_file,
+                            "confidence": dep.confidence
+                        } for dep in c.conflicted_dependencies
+                    ],
+                    "recommended_version": c.recommended_version,
+                    "resolution_steps": c.resolution_steps,
+                    "impact_assessment": c.impact_assessment
+                } for c in conflict_analysis.conflicts
+            ],
+            "total_dependencies": conflict_analysis.total_dependencies,
+            "conflicted_dependencies": conflict_analysis.conflicted_dependencies,
+            "severity_breakdown": conflict_analysis.severity_breakdown,
+            "recommendations": conflict_analysis.recommendations
+        }
+
+    def _serialize_sbom_result(self, sbom_result) -> Dict[str, Any]:
+        """Serialize SBOM result."""
+        return {
+            "format": sbom_result.format.value,
+            "components_count": sbom_result.components_count,
+            "file_size": sbom_result.file_size,
+            "metadata": {
+                "timestamp": sbom_result.metadata.timestamp,
+                "tools": sbom_result.metadata.tools,
+                "authors": sbom_result.metadata.authors,
+                "component_name": sbom_result.metadata.component_name,
+                "component_version": sbom_result.metadata.component_version
+            }
+        }
+
+    def _generate_analysis_summary(self, comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis) -> Dict[str, Any]:
+        """Generate high-level analysis summary."""
+        summary = {
+            "total_dependencies": 0,
+            "total_frameworks": 0,
+            "total_versions": 0,
+            "total_conflicts": 0,
+            "security_issues": 0,
+            "analysis_completeness": 0
+        }
+        
+        completeness_score = 0
+        
+        if comprehensive_deps:
+            summary["total_dependencies"] = comprehensive_deps.get("statistics", {}).get("total_dependencies", 0)
+            summary["total_frameworks"] = len(comprehensive_deps.get("frameworks", []))
+            completeness_score += 25
+        
+        if version_analysis:
+            summary["total_versions"] = len(version_analysis.versions)
+            completeness_score += 25
+        
+        if conflict_analysis:
+            summary["total_conflicts"] = len(conflict_analysis.conflicts)
+            completeness_score += 25
+        
+        if dependency_analysis:
+            summary["security_issues"] = dependency_analysis.get("summary", {}).get("security_issues_count", 0)
+            completeness_score += 25
+        
+        summary["analysis_completeness"] = completeness_score
+        
+        return summary
+
+    def _generate_complete_recommendations(self, comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis) -> List[str]:
+        """Generate comprehensive recommendations based on all analyses."""
+        recommendations = []
+        
+        # From comprehensive dependency analysis
+        if comprehensive_deps and comprehensive_deps.get("summary", {}).get("recommendation"):
+            recommendations.append(comprehensive_deps["summary"]["recommendation"])
+        
+        # From conflict analysis
+        if conflict_analysis and conflict_analysis.recommendations:
+            recommendations.extend(conflict_analysis.recommendations[:3])  # Top 3 conflict recommendations
+        
+        # Security-focused recommendations
+        if dependency_analysis:
+            security_count = dependency_analysis.get("summary", {}).get("security_issues_count", 0)
+            if security_count > 0:
+                recommendations.append(f"🔒 Address {security_count} security issues before production use")
+        
+        # Version-based recommendations
+        if version_analysis and len(version_analysis.versions) > 50:
+            recommendations.append("📦 Consider dependency consolidation - high number of versions detected")
+        
+        # General recommendations
+        recommendations.extend([
+            "📋 Review all analysis sections for detailed insights",
+            "🔄 Re-run analysis after making dependency changes",
+            "📊 Use SBOM for compliance and supply chain security"
+        ])
+        
+        return recommendations[:8]  # Limit to top 8 recommendations
+
+    def _generate_risk_assessment(self, comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis) -> Dict[str, Any]:
+        """Generate overall risk assessment."""
+        risk_score = 0  # 0-100, higher is riskier
+        risk_factors = []
+        
+        # Security risks
+        if dependency_analysis:
+            security_count = dependency_analysis.get("summary", {}).get("security_issues_count", 0)
+            critical_count = dependency_analysis.get("summary", {}).get("critical_issues", 0)
+            high_count = dependency_analysis.get("summary", {}).get("high_issues", 0)
+            
+            if critical_count > 0:
+                risk_score += 40
+                risk_factors.append(f"🚨 {critical_count} critical security vulnerabilities")
+            
+            if high_count > 0:
+                risk_score += 20
+                risk_factors.append(f"⚠️ {high_count} high-severity security issues")
+        
+        # Conflict risks
+        if conflict_analysis:
+            critical_conflicts = len([c for c in conflict_analysis.conflicts if c.severity.value == "critical"])
+            high_conflicts = len([c for c in conflict_analysis.conflicts if c.severity.value == "high"])
+            
+            if critical_conflicts > 0:
+                risk_score += 25
+                risk_factors.append(f"💥 {critical_conflicts} critical dependency conflicts")
+            
+            if high_conflicts > 0:
+                risk_score += 15
+                risk_factors.append(f"⚡ {high_conflicts} high-severity conflicts")
+        
+        # Dependency risks
+        if comprehensive_deps:
+            outdated_count = len(comprehensive_deps.get("risk_assessment", {}).get("outdated_dependencies", []))
+            security_concerns = len(comprehensive_deps.get("risk_assessment", {}).get("security_concerns", []))
+            
+            if outdated_count > 5:
+                risk_score += 10
+                risk_factors.append(f"📅 {outdated_count} potentially outdated dependencies")
+            
+            if security_concerns > 0:
+                risk_score += 15
+                risk_factors.append(f"🔍 {security_concerns} security concerns identified")
+        
+        # Determine risk level
+        if risk_score >= 70:
+            risk_level = "HIGH"
+            risk_color = "red"
+        elif risk_score >= 40:
+            risk_level = "MEDIUM"
+            risk_color = "orange"
+        elif risk_score >= 20:
+            risk_level = "LOW"
+            risk_color = "yellow"
+        else:
+            risk_level = "MINIMAL"
+            risk_color = "green"
+        
+        return {
+            "risk_score": min(100, risk_score),
+            "risk_level": risk_level,
+            "risk_color": risk_color,
+            "risk_factors": risk_factors,
+            "overall_assessment": self._get_risk_assessment_text(risk_level, risk_score)
+        }
+
+    def _get_risk_assessment_text(self, risk_level: str, risk_score: int) -> str:
+        """Get risk assessment text based on level and score."""
+        if risk_level == "HIGH":
+            return "⛔ HIGH RISK - Significant security and compatibility issues detected. Immediate attention required."
+        elif risk_level == "MEDIUM":
+            return "⚠️ MEDIUM RISK - Some concerns identified. Review and address issues before production use."
+        elif risk_level == "LOW":
+            return "⚡ LOW RISK - Minor issues detected. Generally safe for use with some precautions."
+        else:
+            return "✅ MINIMAL RISK - No significant issues detected. Safe for production use."
+
+    async def _get_dependency_analysis_result(self, jar_id: str):
+        """Get dependency analysis result for internal use."""
+        from .dependency_service import dependency_analysis_service
+        
+        jar_file = self.active_jars[jar_id]
+        temp_path = Path(jar_file.temp_path)
+        
+        # Get dependency analysis
+        analysis_result = await dependency_analysis_service.analyze_jar(
+            temp_path, jar_file.structure
+        )
+        
+        return analysis_result
 
     def cleanup_jar(self, jar_id: str) -> None:
         if jar_id in self.active_jars:

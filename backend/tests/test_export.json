@@ -1,0 +1,27 @@
+{
+  "jar_id": "a9689dc8-2071-46ac-8f39-3f940ca76ac3",
+  "statistics": {
+    "total_dependencies": 0,
+    "direct_dependencies": 0,
+    "transitive_dependencies": 0,
+    "max_depth": 0,
+    "scope_counts": {
+      "compile": 0,
+      "runtime": 0,
+      "test": 0,
+      "provided": 0,
+      "system": 0,
+      "import": 0
+    },
+    "source_counts": {
+      "maven_pom": 0,
+      "gradle_build": 0,
+      "manifest": 0,
+      "imports": 0,
+      "classpath": 0,
+      "detected": 0
+    }
+  },
+  "dependencies": [],
+  "conflicts": []
+}

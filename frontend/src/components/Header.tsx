@@ -1,11 +1,19 @@
 import { useState } from 'react'
-import { Moon, Sun, FileArchive, Settings, Info, X, Code2 } from 'lucide-react'
+import { Moon, Sun, FileArchive, Settings, Info, X, Code2, Package } from 'lucide-react'
 import { useTheme } from './ThemeProvider'
 import { useJarViewerStore } from '@/stores/jarViewerStore'
 
-export function Header() {
+type ViewMode = 'files' | 'dependencies';
+
+interface HeaderProps {
+  currentJar?: any;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
+}
+
+export function Header({ currentJar, viewMode = 'files', onViewModeChange }: HeaderProps) {
   const { theme, setTheme } = useTheme()
-  const { currentJar, reset, autoDecompile, setAutoDecompile } = useJarViewerStore()
+  const { reset, autoDecompile, setAutoDecompile } = useJarViewerStore()
   const [showSettings, setShowSettings] = useState(false)
 
   const toggleTheme = () => {
@@ -23,9 +31,37 @@ export function Header() {
         </div>
       </div>
 
-      {/* Current JAR Info */}
-      {currentJar && (
-        <div className="flex items-center space-x-4">
+      {/* Navigation Menu - Only show when JAR is loaded */}
+      {currentJar && onViewModeChange && (
+        <div className="flex items-center space-x-1 bg-muted rounded-lg p-1">
+          <button
+            onClick={() => onViewModeChange('files')}
+            className={`flex items-center space-x-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              viewMode === 'files'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Code2 className="w-4 h-4" />
+            <span>File Structure</span>
+          </button>
+          <button
+            onClick={() => onViewModeChange('dependencies')}
+            className={`flex items-center space-x-2 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              viewMode === 'dependencies'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Package className="w-4 h-4" />
+            <span>Analyze Dependencies</span>
+          </button>
+        </div>
+      )}
+
+      {/* Current JAR Info and Controls */}
+      <div className="flex items-center space-x-4">
+        {currentJar && (
           <div className="text-sm">
             <span className="text-muted-foreground">Current: </span>
             <span className="font-medium">{currentJar.name}</span>
@@ -33,136 +69,78 @@ export function Header() {
               ({(currentJar.size / 1024 / 1024).toFixed(1)} MB)
             </span>
           </div>
+        )}
+
+        {/* Controls */}
+        <div className="flex items-center space-x-2">
+          {currentJar && (
+            <button
+              onClick={reset}
+              className="px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition-colors"
+            >
+              New JAR
+            </button>
+          )}
+
+          {/* Theme Toggle */}
           <button
-            onClick={reset}
-            className="btn btn-outline btn-sm"
+            onClick={toggleTheme}
+            className="p-2 rounded-md hover:bg-accent transition-colors"
+            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
           >
-            New JAR
-          </button>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center space-x-2">
-        <button
-          onClick={toggleTheme}
-          className="btn btn-ghost btn-sm"
-          aria-label="Toggle theme"
-        >
-          {theme === 'light' ? (
-            <Moon className="h-4 w-4" />
-          ) : (
-            <Sun className="h-4 w-4" />
-          )}
-        </button>
-        
-        {/* Settings Button with Dropdown */}
-        <div className="relative">
-          <button 
-            onClick={() => setShowSettings(!showSettings)}
-            className="btn btn-ghost btn-sm" 
-            aria-label="Settings"
-          >
-            <Settings className="h-4 w-4" />
+            {theme === 'light' ? (
+              <Moon className="h-4 w-4" />
+            ) : (
+              <Sun className="h-4 w-4" />
+            )}
           </button>
 
-          {/* Settings Dropdown */}
-          {showSettings && (
-            <div className="absolute right-0 top-10 z-50 w-80 rounded-md border bg-card p-4 shadow-lg">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-medium">Settings</h3>
-                  <button
-                    onClick={() => setShowSettings(false)}
-                    className="h-6 w-6 rounded-sm opacity-70 hover:opacity-100"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
+          {/* Settings */}
+          <div className="relative">
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="p-2 rounded-md hover:bg-accent transition-colors"
+              title="Settings"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
 
-                {/* Auto-Decompile Setting */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Code2 className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <label className="text-sm font-medium">Auto-Decompile</label>
-                        <p className="text-xs text-muted-foreground">
-                          Automatically decompile .class files when selected
-                        </p>
+            {/* Settings Dropdown */}
+            {showSettings && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setShowSettings(false)}
+                />
+                <div className="absolute right-0 top-full mt-2 w-64 bg-card border border-border rounded-lg shadow-lg z-50">
+                  <div className="p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-medium">Settings</h3>
+                      <button
+                        onClick={() => setShowSettings(false)}
+                        className="p-1 rounded hover:bg-accent"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm">Auto-decompile .class files</label>
+                        <input
+                          type="checkbox"
+                          checked={autoDecompile}
+                          onChange={(e) => setAutoDecompile(e.target.checked)}
+                          className="rounded"
+                        />
                       </div>
                     </div>
-                    <button
-                      onClick={() => {
-                        setAutoDecompile(!autoDecompile)
-                        console.log('⚙️ Header: Auto-decompile toggled to:', !autoDecompile)
-                      }}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        autoDecompile ? 'bg-primary' : 'bg-muted'
-                      }`}
-                      role="switch"
-                      aria-checked={autoDecompile}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
-                          autoDecompile ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  <div className="text-xs text-muted-foreground pl-6">
-                    {autoDecompile ? (
-                      <span className="text-green-600">✓ Enabled - .class files will be auto-decompiled</span>
-                    ) : (
-                      <span>Disabled - Use decompile button manually</span>
-                    )}
                   </div>
                 </div>
-
-                {/* Theme Setting */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      {theme === 'light' ? (
-                        <Sun className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <Moon className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <div>
-                        <label className="text-sm font-medium">Theme</label>
-                        <p className="text-xs text-muted-foreground">
-                          Choose your preferred theme
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={toggleTheme}
-                      className="btn btn-outline btn-sm"
-                    >
-                      {theme === 'light' ? 'Light' : 'Dark'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Info Section */}
-                <div className="border-t pt-3">
-                  <div className="text-xs text-muted-foreground">
-                    <p><strong>JarViewer v1.0.0</strong></p>
-                    <p>Enterprise JAR File Analyzer</p>
-                    <p className="mt-1">
-                      Auto-decompile: {autoDecompile ? 'ON' : 'OFF'} | 
-                      Theme: {theme}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
-        
-        <button className="btn btn-ghost btn-sm" aria-label="About">
-          <Info className="h-4 w-4" />
-        </button>
       </div>
     </header>
   )

@@ -4,19 +4,18 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: ../docker/Dockerfile.backend.dev
+      dockerfile: ../docker/Dockerfile.backend.simple
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - /app/.venv
     environment:
       - PYTHONPATH=/app
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
       - CORS_ORIGINS=http://localhost:3000
       - MAX_FILE_SIZE=524288000  # 500MB
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    # command: poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

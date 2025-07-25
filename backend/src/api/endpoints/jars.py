@@ -291,6 +291,236 @@ async def analyze_dependencies(jar_id: str) -> JSONResponse:
         raise HTTPException(status_code=500, detail="Dependency analysis failed")
 
 
+@router.get("/{jar_id}/analysis/comprehensive")
+async def analyze_comprehensive_dependencies(jar_id: str) -> JSONResponse:
+    """Get comprehensive dependency analysis for project decision-making."""
+    
+    try:
+        comprehensive_result = await jar_service.analyze_comprehensive_dependencies(jar_id)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": comprehensive_result
+            }
+        )
+        
+    except JarProcessingError as e:
+        logger.error("Comprehensive dependency analysis failed", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=404, detail=str(e))
+        
+    except Exception as e:
+        logger.error("Comprehensive dependency analysis error", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Comprehensive dependency analysis failed")
+
+
+@router.get("/{jar_id}/analysis/versions")
+async def extract_versions(jar_id: str) -> JSONResponse:
+    """Extract comprehensive version information from JAR."""
+    
+    try:
+        version_result = await jar_service.extract_all_versions(jar_id)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": {
+                    "versions": [
+                        {
+                            "name": v.name,
+                            "version": v.version,
+                            "group_id": v.group_id,
+                            "artifact_id": v.artifact_id,
+                            "source": v.source,
+                            "source_file": v.source_file,
+                            "confidence": v.confidence
+                        } for v in version_result.versions
+                    ],
+                    "manifest_info": version_result.manifest_info,
+                    "build_info": version_result.build_info,
+                    "framework_versions": version_result.framework_versions,
+                    "total_versions": len(version_result.versions)
+                }
+            }
+        )
+        
+    except JarProcessingError as e:
+        logger.error("Version extraction failed", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=404, detail=str(e))
+        
+    except Exception as e:
+        logger.error("Version extraction error", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Version extraction failed")
+
+
+@router.get("/{jar_id}/analysis/conflicts")
+async def analyze_conflicts(jar_id: str) -> JSONResponse:
+    """Analyze dependency conflicts and provide resolution recommendations."""
+    
+    try:
+        conflict_result = await jar_service.analyze_dependency_conflicts(jar_id)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": {
+                    "conflicts": [
+                        {
+                            "conflict_type": c.conflict_type.value,
+                            "severity": c.severity.value,
+                            "title": c.title,
+                            "description": c.description,
+                            "conflicted_dependencies": [
+                                {
+                                    "name": dep.name,
+                                    "version": dep.version,
+                                    "source": dep.source,
+                                    "source_file": dep.source_file,
+                                    "confidence": dep.confidence
+                                } for dep in c.conflicted_dependencies
+                            ],
+                            "recommended_version": c.recommended_version,
+                            "resolution_steps": c.resolution_steps,
+                            "impact_assessment": c.impact_assessment
+                        } for c in conflict_result.conflicts
+                    ],
+                    "total_dependencies": conflict_result.total_dependencies,
+                    "conflicted_dependencies": conflict_result.conflicted_dependencies,
+                    "severity_breakdown": conflict_result.severity_breakdown,
+                    "recommendations": conflict_result.recommendations
+                }
+            }
+        )
+        
+    except JarProcessingError as e:
+        logger.error("Conflict analysis failed", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=404, detail=str(e))
+        
+    except Exception as e:
+        logger.error("Conflict analysis error", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Conflict analysis failed")
+
+
+@router.post("/{jar_id}/sbom/generate")
+async def generate_sbom(
+    jar_id: str,
+    format: str = Query("cyclonedx", description="SBOM format: cyclonedx or spdx")
+) -> JSONResponse:
+    """Generate Software Bill of Materials (SBOM) for the JAR."""
+    
+    try:
+        if format.lower() not in ["cyclonedx", "spdx"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid format. Supported formats: cyclonedx, spdx"
+            )
+        
+        sbom_result = await jar_service.generate_sbom(jar_id, format.lower())
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": {
+                    "format": sbom_result.format.value,
+                    "sbom": sbom_result.content,
+                    "metadata": {
+                        "timestamp": sbom_result.metadata.timestamp,
+                        "tools": sbom_result.metadata.tools,
+                        "authors": sbom_result.metadata.authors,
+                        "component_name": sbom_result.metadata.component_name,
+                        "component_version": sbom_result.metadata.component_version
+                    },
+                    "components_count": sbom_result.components_count,
+                    "file_size": sbom_result.file_size
+                }
+            }
+        )
+        
+    except JarProcessingError as e:
+        logger.error("SBOM generation failed", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=404, detail=str(e))
+        
+    except Exception as e:
+        logger.error("SBOM generation error", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=500, detail="SBOM generation failed")
+
+
+@router.get("/{jar_id}/sbom/export")
+async def export_sbom(
+    jar_id: str,
+    format: str = Query("cyclonedx", description="SBOM format: cyclonedx or spdx"),
+    export_format: str = Query("json", description="Export format: json or xml")
+) -> JSONResponse:
+    """Export SBOM to downloadable file."""
+    
+    try:
+        if format.lower() not in ["cyclonedx", "spdx"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid format. Supported formats: cyclonedx, spdx"
+            )
+        
+        if export_format.lower() not in ["json", "xml"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid export format. Supported formats: json, xml"
+            )
+        
+        export_result = await jar_service.export_sbom(
+            jar_id, format.lower(), export_format.lower()
+        )
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": {
+                    "download_url": f"/api/jars/{jar_id}/sbom/download/{export_result['filename']}",
+                    "filename": export_result['filename'],
+                    "file_size": export_result['file_size'],
+                    "format": format.lower(),
+                    "export_format": export_format.lower()
+                }
+            }
+        )
+        
+    except JarProcessingError as e:
+        logger.error("SBOM export failed", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=404, detail=str(e))
+        
+    except Exception as e:
+        logger.error("SBOM export error", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=500, detail="SBOM export failed")
+
+
+@router.get("/{jar_id}/analysis/complete")
+async def get_complete_analysis(jar_id: str) -> JSONResponse:
+    """Get complete comprehensive analysis combining all analysis types."""
+    
+    try:
+        complete_analysis = await jar_service.get_complete_analysis(jar_id)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": complete_analysis
+            }
+        )
+        
+    except JarProcessingError as e:
+        logger.error("Complete analysis failed", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=404, detail=str(e))
+        
+    except Exception as e:
+        logger.error("Complete analysis error", jar_id=jar_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Complete analysis failed")
+
+
 @router.delete("/{jar_id}")
 async def delete_jar(jar_id: str) -> JSONResponse:
     """Delete a JAR and its associated data."""
