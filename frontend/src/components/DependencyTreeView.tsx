@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useEffect, createContext, useContext } from 'react';
+import React, { useMemo, useCallback, useEffect, createContext, useContext, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronRightIcon,
@@ -15,6 +15,7 @@ import {
   DependencyTree, 
   SearchFilters 
 } from '@/stores/singleJarDashboardStore';
+import ProgressiveTreeLoader from './ProgressiveTreeLoader';
 
 // Context for sharing tree state with nested components
 interface DependencyTreeContextType {
@@ -59,6 +60,16 @@ const DependencyTreeView: React.FC<DependencyTreeViewProps> = ({
 }) => {
   // Session persistence key for this dependency tree
   const sessionKey = `dependency-tree-${dependencyTree.jar_id}`;
+  
+  // Use progressive loading for large dependency trees
+  const [useProgressiveLoading, setUseProgressiveLoading] = useState(false);
+
+  // Determine if we should use progressive loading
+  useEffect(() => {
+    const totalDeps = dependencyTree.total_dependencies;
+    const shouldUseProgressive = totalDeps > 100; // Threshold for progressive loading
+    setUseProgressiveLoading(shouldUseProgressive);
+  }, [dependencyTree.total_dependencies]);
 
   // Load expanded nodes from session storage on mount
   useEffect(() => {
@@ -217,6 +228,43 @@ const DependencyTreeView: React.FC<DependencyTreeViewProps> = ({
     onDependencySelect,
     onNodeToggle
   };
+
+  // Use progressive loading for large trees
+  if (useProgressiveLoading) {
+    return (
+      <DependencyTreeContext.Provider value={contextValue}>
+        <div className={`dependency-tree-view ${className}`}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                  Dependency Tree
+                </h3>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400 px-2 py-1 rounded">
+                    Progressive Loading
+                  </span>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {dependencyTree.total_dependencies} dependencies
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <ProgressiveTreeLoader
+              dependencyTree={dependencyTree}
+              searchQuery={searchQuery}
+              filters={filters}
+              selectedDependency={selectedDependency}
+              expandedNodes={expandedNodes}
+              onDependencySelect={onDependencySelect}
+              onNodeToggle={onNodeToggle}
+            />
+          </div>
+        </div>
+      </DependencyTreeContext.Provider>
+    );
+  }
 
   return (
     <DependencyTreeContext.Provider value={contextValue}>

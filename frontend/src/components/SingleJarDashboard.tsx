@@ -291,15 +291,17 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
             </p>
           </div>
           <div className="flex items-center space-x-2">
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              summary.risk_level === 'high' 
-                ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
-                : summary.risk_level === 'medium'
-                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
-                : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-            }`}>
-              Risk: {summary.risk_level}
-            </span>
+            {summary?.risk_level && (
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                summary.risk_level === 'high' 
+                  ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
+                  : summary.risk_level === 'medium'
+                  ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                  : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+              }`}>
+                Risk: {summary.risk_level}
+              </span>
+            )}
           </div>
         </div>
       </div>

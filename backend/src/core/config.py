@@ -3,7 +3,7 @@ Application configuration using Pydantic Settings
 """
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -67,9 +67,14 @@ class Settings(BaseSettings):
     METRICS_PORT: int = Field(default=9090, description="Metrics port")
     
     # Caching (optional)
-    REDIS_URL: str = Field(default="redis://localhost:6379", description="Redis URL")
+    REDIS_URL: Optional[str] = Field(default=None, description="Redis URL (optional)")
     CACHE_TTL: int = Field(default=3600, description="Cache TTL in seconds")
     ENABLE_CACHE: bool = Field(default=False, description="Enable caching")
+    
+    # Performance Monitoring
+    ENABLE_PERFORMANCE_MONITORING: bool = Field(default=True, description="Enable performance monitoring")
+    PERFORMANCE_RETENTION_HOURS: int = Field(default=24, description="Performance metrics retention in hours")
+    SLOW_OPERATION_THRESHOLD_MS: float = Field(default=5000.0, description="Slow operation threshold in milliseconds")
 
 
 @lru_cache()

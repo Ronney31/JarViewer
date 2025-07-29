@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from ...models.jar import JarFile, JarMetadata, FileContent, SearchResult, ProcessingProgress
 from ...services.jar_service import jar_service, JarProcessingError, SecurityError
+from ...services.performance_monitoring_service import performance_service
 from ...core.config import get_settings
 
 logger = structlog.get_logger()
@@ -695,3 +696,68 @@ async def cleanup_temp_file(file_path: Path):
             logger.info("Temporary file cleaned up", path=str(file_path))
     except Exception as e:
         logger.error("Failed to cleanup temporary file", path=str(file_path), error=str(e))
+
+@router.get("/performance/stats")
+async def get_performance_stats(
+    operation: Optional[str] = Query(None, description="Specific operation to get stats for"),
+    time_window: str = Query("1h", description="Time window (1h, 24h)")
+) -> JSONResponse:
+    """Get performance statistics for JAR operations."""
+    try:
+        if operation:
+            stats = await performance_service.get_stats(operation, time_window)
+            if not stats:
+                raise HTTPException(status_code=404, detail=f"No stats found for operation: {operation}")
+            return JSONResponse(content={"operation": operation, "stats": stats.__dict__})
+        else:
+            all_stats = await performance_service.get_all_stats(time_window)
+            return JSONResponse(content={
+                "time_window": time_window,
+                "operations": {op: stats.__dict__ for op, stats in all_stats.items()}
+            })
+    except Exception as e:
+        logger.error("Failed to get performance stats", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve performance statistics")
+
+
+@router.get("/performance/report")
+async def get_performance_report() -> JSONResponse:
+    """Get comprehensive performance report."""
+    try:
+        report = await performance_service.get_performance_report()
+        return JSONResponse(content=report)
+    except Exception as e:
+        logger.error("Failed to get performance report", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate performance report")
+
+
+@router.get("/performance/slow-operations")
+async def get_slow_operations(
+    threshold_ms: float = Query(1000.0, description="Threshold in milliseconds"),
+    limit: int = Query(10, description="Maximum number of results")
+) -> JSONResponse:
+    """Get slowest operations above threshold."""
+    try:
+        slow_ops = performance_service.get_slow_operations(threshold_ms, limit)
+        return JSONResponse(content={
+            "threshold_ms": threshold_ms,
+            "slow_operations": [op.__dict__ for op in slow_ops]
+        })
+    except Exception as e:
+        logger.error("Failed to get slow operations", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve slow operations")
+
+
+@router.post("/performance/clear-cache")
+async def clear_performance_cache(
+    operation: Optional[str] = Query(None, description="Specific operation to clear cache for")
+) -> JSONResponse:
+    """Clear performance monitoring cache."""
+    try:
+        performance_service.clear_metrics(operation)
+        return JSONResponse(content={
+            "message": f"Cache cleared for {'all operations' if not operation else operation}"
+        })
+    except Exception as e:
+        logger.error("Failed to clear performance cache", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to clear performance cache")

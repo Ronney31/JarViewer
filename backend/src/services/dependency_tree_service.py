@@ -9,11 +9,16 @@ from pathlib import Path
 from typing import Dict, List, Set, Optional, Any, Tuple
 import structlog
 from collections import defaultdict
+import hashlib
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from ..models.jar import (
     DependencyNode, DependencyTree, DependencyConflict, DependencyPath,
     DependencyScope, DependencySource, ConflictType, ConflictSeverity, DependencyAnalysisReport
 )
+from .cache_service import cache_service
+from .performance_monitoring_service import performance_service, monitor_performance
 
 logger = structlog.get_logger()
 
@@ -23,7 +28,15 @@ class DependencyTreeService:
     
     def __init__(self):
         self.known_transitive_deps = self._load_known_transitive_dependencies()
+        self.executor = ThreadPoolExecutor(max_workers=2)  # For CPU-intensive tasks
     
+    def _calculate_tree_cache_key(self, jar_id: str, jar_path: Path) -> str:
+        """Calculate cache key for dependency tree."""
+        stat = jar_path.stat()
+        key_data = f"{jar_id}:{jar_path.name}:{stat.st_size}:{stat.st_mtime}"
+        return hashlib.md5(key_data.encode()).hexdigest()
+    
+    @monitor_performance("build_dependency_tree")
     async def build_dependency_tree(
         self, 
         jar_id: str,
@@ -41,31 +54,54 @@ class DependencyTreeService:
         """
         logger.info("Building dependency tree", jar_id=jar_id, jar_path=str(jar_path))
         
-        # Initialize tree
-        tree = DependencyTree(jar_id=jar_id)
+        # Check cache first
+        cache_key = self._calculate_tree_cache_key(jar_id, jar_path)
+        cached_tree = await cache_service.get_dependency_tree(jar_id, cache_key)
         
-        # Extract direct dependencies from build files
-        direct_deps = await self._extract_direct_dependencies(jar_path)
+        if cached_tree:
+            logger.info("Using cached dependency tree", jar_id=jar_id)
+            # Reconstruct tree object from cached data
+            tree = DependencyTree(jar_id=jar_id)
+            tree.__dict__.update(cached_tree)
+            return tree
         
-        # Add direct dependencies to tree
-        for dep in direct_deps:
-            tree.add_dependency(dep)
-        
-        # Build transitive dependency relationships
-        await self._build_transitive_dependencies(tree, jar_path)
-        
-        # Detect and analyze conflicts
-        tree.detect_conflicts()
-        
-        # Generate dependency paths
-        await self._generate_dependency_paths(tree)
-        
-        logger.info("Dependency tree built successfully", 
-                   total_deps=tree.total_dependencies,
-                   conflicts=len(tree.conflicts),
-                   max_depth=tree.max_depth)
-        
-        return tree
+        async with performance_service.monitor_operation(
+            "build_dependency_tree_full",
+            {"jar_id": jar_id, "jar_path": str(jar_path)}
+        ):
+            # Initialize tree
+            tree = DependencyTree(jar_id=jar_id)
+            
+            # Extract direct dependencies from build files
+            direct_deps = await self._extract_direct_dependencies(jar_path)
+            
+            # Add direct dependencies to tree
+            for dep in direct_deps:
+                tree.add_dependency(dep)
+            
+            # Build transitive dependency relationships
+            await self._build_transitive_dependencies(tree, jar_path)
+            
+            # Detect and analyze conflicts
+            tree.detect_conflicts()
+            
+            # Generate dependency paths
+            await self._generate_dependency_paths(tree)
+            
+            # Cache the result
+            await cache_service.set_dependency_tree(
+                jar_id, 
+                cache_key, 
+                tree.__dict__, 
+                ttl=7200  # 2 hours
+            )
+            
+            logger.info("Dependency tree built successfully", 
+                       total_deps=tree.total_dependencies,
+                       conflicts=len(tree.conflicts),
+                       max_depth=tree.max_depth)
+            
+            return tree
     
     def build_tree_from_flat_list(
         self, 

@@ -3,8 +3,9 @@ class ApiService {
   private baseUrl: string;
 
   constructor() {
-    // Try multiple API endpoints as fallback
-    this.baseUrl = '/api/v1'; // Default to proxy
+    // Use environment variable for API URL, fallback to localhost:9000
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:9000';
+    this.baseUrl = `${apiUrl}/api/v1`;
   }
 
   /**

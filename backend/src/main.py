@@ -18,6 +18,8 @@ from .api.routes import api_router
 from .core.config import get_settings
 from .core.logging import setup_logging
 from .core.security import SecurityMiddleware
+from .services.cache_service import cache_service
+from .services.performance_monitoring_service import performance_service
 
 # Initialize structured logging
 setup_logging()
@@ -37,10 +39,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting JarViewer backend", version=app.version)
     app.state.start_time = time.time()
     
+    # Initialize performance monitoring
+    if settings.ENABLE_PERFORMANCE_MONITORING:
+        performance_service.enable()
+        logger.info("Performance monitoring enabled")
+    else:
+        performance_service.disable()
+        logger.info("Performance monitoring disabled")
+    
     yield
     
     # Shutdown
     logger.info("Shutting down JarViewer backend")
+    performance_service.disable()
 
 
 # Create FastAPI application
@@ -156,11 +167,18 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     start_time = getattr(app.state, 'start_time', time.time())
+    cache_health = cache_service.health_check()
+    
     return {
         "status": "healthy",
         "timestamp": time.time(),
         "version": app.version,
         "uptime": time.time() - start_time,
+        "cache": cache_health,
+        "performance_monitoring": {
+            "enabled": performance_service.enabled,
+            "retention_hours": performance_service.retention_hours
+        }
     }
 
 

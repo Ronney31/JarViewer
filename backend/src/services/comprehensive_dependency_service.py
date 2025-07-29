@@ -12,6 +12,12 @@ import structlog
 from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
+import hashlib
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+from .cache_service import cache_service
+from .performance_monitoring_service import performance_service, monitor_performance
 
 logger = structlog.get_logger()
 
@@ -84,72 +90,113 @@ class ComprehensiveDependencyService:
         self.known_libraries = self._load_known_libraries()
         self.framework_signatures = self._load_framework_signatures()
         self.license_patterns = self._load_license_patterns()
+        self.executor = ThreadPoolExecutor(max_workers=4)  # For CPU-intensive tasks
     
+    def _calculate_jar_hash(self, jar_path: Path, jar_size: int) -> str:
+        """Calculate a hash for the JAR to use as cache key."""
+        # Use file size and modification time for quick hash
+        stat = jar_path.stat()
+        hash_input = f"{jar_path.name}:{jar_size}:{stat.st_mtime}"
+        return hashlib.md5(hash_input.encode()).hexdigest()
+    
+    @monitor_performance("comprehensive_dependency_analysis")
     async def analyze_comprehensive_dependencies(
         self, 
         jar_path: Path, 
-        jar_size: int
+        jar_size: int,
+        jar_id: Optional[str] = None
     ) -> ComprehensiveDependencyReport:
         """
         Perform comprehensive dependency analysis for project decision-making.
         """
         logger.info("Starting comprehensive dependency analysis", jar_path=str(jar_path))
         
-        # Initialize collections
-        maven_deps = []
-        gradle_deps = []
-        detected_libs = []
-        frameworks = []
+        # Calculate cache key
+        jar_hash = self._calculate_jar_hash(jar_path, jar_size)
         
-        # Extract from build files
-        maven_deps = await self._extract_maven_dependencies(jar_path)
-        gradle_deps = await self._extract_gradle_dependencies(jar_path)
+        # Try to get from cache first
+        if jar_id:
+            cached_report = await cache_service.get_comprehensive_analysis(jar_id, jar_hash)
+            if cached_report:
+                logger.info("Using cached comprehensive analysis", jar_id=jar_id)
+                return ComprehensiveDependencyReport(**cached_report)
         
-        # Detect libraries from imports and packages
-        detected_libs = await self._detect_libraries_from_code(jar_path)
-        
-        # Detect frameworks
-        frameworks = await self._detect_frameworks(jar_path)
-        
-        # Analyze packages
-        package_analysis = await self._analyze_packages(jar_path)
-        
-        # Get Java and build info
-        java_version = await self._detect_java_version(jar_path)
-        build_tool = await self._detect_build_tool(jar_path)
-        
-        # Risk assessment
-        outdated_deps = await self._check_outdated_dependencies(maven_deps + gradle_deps + detected_libs)
-        security_concerns = await self._assess_security_risks(maven_deps + gradle_deps + detected_libs)
-        license_info = await self._extract_license_information(jar_path)
-        
-        # Calculate statistics
-        total_deps = len(maven_deps) + len(gradle_deps) + len(detected_libs)
-        
-        report = ComprehensiveDependencyReport(
-            maven_dependencies=maven_deps,
-            gradle_dependencies=gradle_deps,
-            detected_libraries=detected_libs,
-            frameworks=frameworks,
-            java_version=java_version,
-            build_tool=build_tool,
-            top_packages=package_analysis['top_packages'],
-            external_packages=package_analysis['external_packages'],
-            total_dependencies=total_deps,
-            total_classes=package_analysis['total_classes'],
-            total_packages=package_analysis['total_packages'],
-            jar_size_mb=round(jar_size / (1024 * 1024), 2),
-            outdated_dependencies=outdated_deps,
-            security_concerns=security_concerns,
-            license_info=license_info
-        )
-        
-        logger.info("Comprehensive dependency analysis completed",
-                   total_dependencies=total_deps,
-                   frameworks=len(frameworks),
-                   packages=len(package_analysis['external_packages']))
-        
-        return report
+        async with performance_service.monitor_operation(
+            "comprehensive_analysis_full", 
+            {"jar_path": str(jar_path), "jar_size": jar_size}
+        ):
+            # Run analysis tasks concurrently for better performance
+            tasks = [
+                self._extract_maven_dependencies(jar_path),
+                self._extract_gradle_dependencies(jar_path),
+                self._detect_libraries_from_code(jar_path),
+                self._detect_frameworks(jar_path),
+                self._analyze_packages(jar_path),
+                self._detect_java_version(jar_path),
+                self._detect_build_tool(jar_path),
+                self._extract_license_information(jar_path)
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Handle results and exceptions
+            maven_deps = results[0] if not isinstance(results[0], Exception) else []
+            gradle_deps = results[1] if not isinstance(results[1], Exception) else []
+            detected_libs = results[2] if not isinstance(results[2], Exception) else []
+            frameworks = results[3] if not isinstance(results[3], Exception) else []
+            package_analysis = results[4] if not isinstance(results[4], Exception) else {
+                'top_packages': [], 'external_packages': [], 'total_classes': 0, 'total_packages': 0
+            }
+            java_version = results[5] if not isinstance(results[5], Exception) else None
+            build_tool = results[6] if not isinstance(results[6], Exception) else None
+            license_info = results[7] if not isinstance(results[7], Exception) else {}
+            
+            # Log any exceptions
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.warning(f"Task {i} failed in comprehensive analysis", error=str(result))
+            
+            # Risk assessment (run after main analysis)
+            all_deps = maven_deps + gradle_deps + detected_libs
+            outdated_deps = await self._check_outdated_dependencies(all_deps)
+            security_concerns = await self._assess_security_risks(all_deps)
+            
+            # Calculate statistics
+            total_deps = len(all_deps)
+            
+            report = ComprehensiveDependencyReport(
+                maven_dependencies=maven_deps,
+                gradle_dependencies=gradle_deps,
+                detected_libraries=detected_libs,
+                frameworks=frameworks,
+                java_version=java_version,
+                build_tool=build_tool,
+                top_packages=package_analysis['top_packages'],
+                external_packages=package_analysis['external_packages'],
+                total_dependencies=total_deps,
+                total_classes=package_analysis['total_classes'],
+                total_packages=package_analysis['total_packages'],
+                jar_size_mb=round(jar_size / (1024 * 1024), 2),
+                outdated_dependencies=outdated_deps,
+                security_concerns=security_concerns,
+                license_info=license_info
+            )
+            
+            # Cache the result
+            if jar_id:
+                await cache_service.set_comprehensive_analysis(
+                    jar_id, 
+                    jar_hash, 
+                    report.__dict__, 
+                    ttl=3600  # 1 hour
+                )
+            
+            logger.info("Comprehensive dependency analysis completed",
+                       total_dependencies=total_deps,
+                       frameworks=len(frameworks),
+                       packages=len(package_analysis['external_packages']))
+            
+            return report
     
     async def _extract_maven_dependencies(self, jar_path: Path) -> List[LibraryDependency]:
         """Extract dependencies from Maven POM files."""
@@ -244,77 +291,112 @@ class ComprehensiveDependencyService:
     
     async def _detect_libraries_from_code(self, jar_path: Path) -> List[LibraryDependency]:
         """Detect libraries by analyzing imports and package usage."""
-        dependencies = []
-        package_usage = defaultdict(int)
-        
-        # Analyze Java files for imports
-        java_files = list(jar_path.rglob("*.java"))
-        class_files = list(jar_path.rglob("*.class"))
-        
-        # Count package usage from imports
-        for java_file in java_files:
-            try:
-                with open(java_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # Find import statements
-                import_pattern = r'import\s+([a-zA-Z][a-zA-Z0-9_.]*);'
-                imports = re.findall(import_pattern, content)
-                
-                for imp in imports:
-                    # Extract root package
-                    parts = imp.split('.')
-                    if len(parts) >= 2:
-                        root_package = '.'.join(parts[:2])
-                        if len(parts) >= 3 and parts[0] in ['org', 'com', 'net', 'io']:
-                            root_package = '.'.join(parts[:3])
-                        
-                        if not root_package.startswith(('java.', 'javax.', 'sun.', 'com.sun.')):
-                            package_usage[root_package] += 1
-                            
-            except Exception:
-                continue
-        
-        # Analyze class files for package structure
-        for class_file in class_files[:100]:  # Limit to avoid performance issues
-            try:
-                relative_path = class_file.relative_to(jar_path)
-                package_path = str(relative_path.parent).replace('/', '.')
-                
-                if package_path and package_path != '.':
-                    parts = package_path.split('.')
-                    if len(parts) >= 2:
-                        root_package = '.'.join(parts[:2])
-                        if len(parts) >= 3 and parts[0] in ['org', 'com', 'net', 'io']:
-                            root_package = '.'.join(parts[:3])
-                        
-                        if not root_package.startswith(('java.', 'javax.', 'sun.', 'com.sun.')):
-                            package_usage[root_package] += 1
-                            
-            except Exception:
-                continue
-        
-        # Convert top packages to library dependencies
-        sorted_packages = sorted(package_usage.items(), key=lambda x: x[1], reverse=True)
-        
-        for package, usage_count in sorted_packages[:50]:  # Top 50 most used packages
-            lib_info = self._get_library_info_by_package(package)
+        async with performance_service.monitor_operation("detect_libraries_from_code"):
+            dependencies = []
+            package_usage = defaultdict(int)
             
-            if lib_info:
-                dependency = LibraryDependency(
-                    name=lib_info['name'],
-                    version=lib_info.get('version'),
-                    group_id=lib_info.get('group_id'),
-                    artifact_id=lib_info.get('artifact_id'),
-                    type=lib_info.get('type', 'library'),
-                    source="code_analysis",
-                    description=lib_info.get('description', f"Detected from package usage: {package}"),
-                    license=lib_info.get('license'),
-                    class_count=usage_count
-                )
-                dependencies.append(dependency)
+            # Get file lists
+            java_files = list(jar_path.rglob("*.java"))
+            class_files = list(jar_path.rglob("*.class"))
+            
+            # Process files in batches to avoid memory issues
+            batch_size = 50
+            
+            # Process Java files in batches
+            for i in range(0, len(java_files), batch_size):
+                batch = java_files[i:i + batch_size]
+                batch_usage = await self._process_java_files_batch(batch, jar_path)
+                for package, count in batch_usage.items():
+                    package_usage[package] += count
+            
+            # Process class files in batches (limit total to avoid performance issues)
+            class_files_limited = class_files[:500]  # Increased limit but still reasonable
+            for i in range(0, len(class_files_limited), batch_size):
+                batch = class_files_limited[i:i + batch_size]
+                batch_usage = await self._process_class_files_batch(batch, jar_path)
+                for package, count in batch_usage.items():
+                    package_usage[package] += count
+            
+            # Convert top packages to library dependencies
+            sorted_packages = sorted(package_usage.items(), key=lambda x: x[1], reverse=True)
+            
+            for package, usage_count in sorted_packages[:50]:  # Top 50 most used packages
+                lib_info = self._get_library_info_by_package(package)
+                
+                if lib_info:
+                    dependency = LibraryDependency(
+                        name=lib_info['name'],
+                        version=lib_info.get('version'),
+                        group_id=lib_info.get('group_id'),
+                        artifact_id=lib_info.get('artifact_id'),
+                        type=lib_info.get('type', 'library'),
+                        source="code_analysis",
+                        description=lib_info.get('description', f"Detected from package usage: {package}"),
+                        license=lib_info.get('license'),
+                        class_count=usage_count
+                    )
+                    dependencies.append(dependency)
+            
+            return dependencies
+    
+    async def _process_java_files_batch(self, java_files: List[Path], jar_path: Path) -> Dict[str, int]:
+        """Process a batch of Java files for import analysis."""
+        def process_batch():
+            package_usage = defaultdict(int)
+            for java_file in java_files:
+                try:
+                    with open(java_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Find import statements
+                    import_pattern = r'import\s+([a-zA-Z][a-zA-Z0-9_.]*);'
+                    imports = re.findall(import_pattern, content)
+                    
+                    for imp in imports:
+                        # Extract root package
+                        parts = imp.split('.')
+                        if len(parts) >= 2:
+                            root_package = '.'.join(parts[:2])
+                            if len(parts) >= 3 and parts[0] in ['org', 'com', 'net', 'io']:
+                                root_package = '.'.join(parts[:3])
+                            
+                            if not root_package.startswith(('java.', 'javax.', 'sun.', 'com.sun.')):
+                                package_usage[root_package] += 1
+                                
+                except Exception:
+                    continue
+            return package_usage
         
-        return dependencies
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, process_batch)
+    
+    async def _process_class_files_batch(self, class_files: List[Path], jar_path: Path) -> Dict[str, int]:
+        """Process a batch of class files for package analysis."""
+        def process_batch():
+            package_usage = defaultdict(int)
+            for class_file in class_files:
+                try:
+                    relative_path = class_file.relative_to(jar_path)
+                    package_path = str(relative_path.parent).replace('/', '.')
+                    
+                    if package_path and package_path != '.':
+                        parts = package_path.split('.')
+                        if len(parts) >= 2:
+                            root_package = '.'.join(parts[:2])
+                            if len(parts) >= 3 and parts[0] in ['org', 'com', 'net', 'io']:
+                                root_package = '.'.join(parts[:3])
+                            
+                            if not root_package.startswith(('java.', 'javax.', 'sun.', 'com.sun.')):
+                                package_usage[root_package] += 1
+                                
+                except Exception:
+                    continue
+            return package_usage
+        
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, process_batch)
     
     async def _detect_frameworks(self, jar_path: Path) -> List[FrameworkInfo]:
         """Detect frameworks used in the JAR."""

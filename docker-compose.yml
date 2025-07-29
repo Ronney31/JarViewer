@@ -6,7 +6,7 @@ services:
       context: ./backend
       dockerfile: ../docker/Dockerfile.backend.simple
     ports:
-      - "8000:8000"
+      - "9000:8000"
     volumes:
       - ./backend:/app
     environment:
@@ -15,12 +15,17 @@ services:
       - LOG_LEVEL=DEBUG
       - CORS_ORIGINS=http://localhost:3000
       - MAX_FILE_SIZE=524288000  # 500MB
+      - REDIS_URL=redis://redis:6379
+      - ENABLE_CACHE=true
+      - ENABLE_PERFORMANCE_MONITORING=true
     # command: poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+    depends_on:
+      - redis
     networks:
       - jarviewer-network
 
@@ -34,7 +39,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://localhost:9000
       - VITE_ENVIRONMENT=development
     command: pnpm dev --host 0.0.0.0
     depends_on:
@@ -42,18 +47,21 @@ services:
     networks:
       - jarviewer-network
 
-  # Optional: Redis for caching (can be enabled later)
+  # Redis for caching and performance optimization
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - jarviewer-network
-    profiles:
-      - caching
 
   # Optional: Prometheus for monitoring (can be enabled later)
   prometheus:

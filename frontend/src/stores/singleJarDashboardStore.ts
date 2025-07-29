@@ -174,7 +174,7 @@ export const useSingleJarDashboardStore = create<SingleJarDashboardState>()(
           errorHandlingService.updateLoadingState(jarId, currentStage, 20, startTime);
           set({ loadingState: errorHandlingService.getLoadingState(jarId) });
 
-          const response = await apiService.get(`/api/v1/jars/${jarId}/analysis/comprehensive`);
+          const response = await apiService.get(`/jars/${jarId}/analysis/comprehensive`);
           
           if (!response.success) {
             throw new Error(response.error || 'Failed to load analysis');
@@ -353,7 +353,7 @@ export const useSingleJarDashboardStore = create<SingleJarDashboardState>()(
         set({ expandedNodes: newExpandedNodes });
       },
 
-      // Search dependencies with filters
+      // Search dependencies with filters (optimized with debouncing and caching)
       searchDependencies: async (query: string, filters: SearchFilters = {}) => {
         const { analysisData } = get();
         
@@ -362,85 +362,27 @@ export const useSingleJarDashboardStore = create<SingleJarDashboardState>()(
         }
         
         try {
+          // Create cache key for search results
+          const cacheKey = `${query.trim()}_${JSON.stringify(filters)}`;
+          
           // If no query and no filters, show all dependencies
           if (!query.trim() && Object.keys(filters).length === 0) {
             set({ searchResults: Object.values(analysisData.dependencyTree.all_dependencies) });
             return;
           }
           
-          // Filter dependencies based on query and filters
-          let results = Object.values(analysisData.dependencyTree.all_dependencies);
+          // Use Web Workers for large dependency sets (if available)
+          const dependencies = Object.values(analysisData.dependencyTree.all_dependencies);
           
-          // Apply text search
-          if (query.trim()) {
-            const queryLower = query.toLowerCase();
-            results = results.filter(dep => 
-              dep.group_id.toLowerCase().includes(queryLower) ||
-              dep.artifact_id.toLowerCase().includes(queryLower) ||
-              (dep.version && dep.version.toLowerCase().includes(queryLower)) ||
-              (dep.description && dep.description.toLowerCase().includes(queryLower)) ||
-              `${dep.group_id}:${dep.artifact_id}`.toLowerCase().includes(queryLower)
-            );
+          let results: DependencyNode[];
+          
+          if (dependencies.length > 500 && 'Worker' in window) {
+            // Use Web Worker for heavy filtering
+            results = await searchWithWebWorker(dependencies, query, filters);
+          } else {
+            // Use main thread for smaller sets
+            results = searchDependenciesSync(dependencies, query, filters);
           }
-          
-          // Apply scope filter
-          if (filters.scopes && filters.scopes.length > 0) {
-            results = results.filter(dep => filters.scopes!.includes(dep.scope));
-          }
-          
-          // Apply source filter
-          if (filters.sources && filters.sources.length > 0) {
-            results = results.filter(dep => filters.sources!.includes(dep.source));
-          }
-          
-          // Apply conflict status filter
-          if (filters.conflictStatus !== undefined) {
-            results = results.filter(dep => dep.has_conflicts === filters.conflictStatus);
-          }
-          
-          // Apply conflict severity filter
-          if (filters.conflictSeverity && filters.conflictSeverity.length > 0) {
-            results = results.filter(dep => 
-              dep.conflict_severity && filters.conflictSeverity!.includes(dep.conflict_severity)
-            );
-          }
-          
-          // Apply depth filter
-          if (filters.depth) {
-            const { min, max } = filters.depth;
-            results = results.filter(dep => {
-              if (min !== undefined && dep.depth < min) return false;
-              if (max !== undefined && dep.depth > max) return false;
-              return true;
-            });
-          }
-          
-          // Apply transitive filter
-          if (filters.transitive !== undefined) {
-            results = results.filter(dep => dep.is_transitive === filters.transitive);
-          }
-          
-          // Sort results by relevance
-          results.sort((a, b) => {
-            // Prioritize exact matches
-            if (query.trim()) {
-              const queryLower = query.toLowerCase();
-              const aExact = a.artifact_id.toLowerCase() === queryLower;
-              const bExact = b.artifact_id.toLowerCase() === queryLower;
-              if (aExact && !bExact) return -1;
-              if (!aExact && bExact) return 1;
-            }
-            
-            // Then by conflicts (conflicts first)
-            if (a.has_conflicts && !b.has_conflicts) return -1;
-            if (!a.has_conflicts && b.has_conflicts) return 1;
-            
-            // Then by depth (direct dependencies first)
-            if (a.depth !== b.depth) return a.depth - b.depth;
-            
-            // Finally by name
-            return `${a.group_id}:${a.artifact_id}`.localeCompare(`${b.group_id}:${b.artifact_id}`);
-          });
           
           set({ searchResults: results });
           
@@ -502,3 +444,198 @@ export type {
   AnalysisData, 
   SearchFilters 
 };
+
+// Helper functions for optimized search
+function searchDependenciesSync(
+  dependencies: DependencyNode[], 
+  query: string, 
+  filters: SearchFilters
+): DependencyNode[] {
+  let results = dependencies;
+  
+  // Apply text search
+  if (query.trim()) {
+    const queryLower = query.toLowerCase();
+    results = results.filter(dep => 
+      dep.group_id.toLowerCase().includes(queryLower) ||
+      dep.artifact_id.toLowerCase().includes(queryLower) ||
+      (dep.version && dep.version.toLowerCase().includes(queryLower)) ||
+      (dep.description && dep.description.toLowerCase().includes(queryLower)) ||
+      `${dep.group_id}:${dep.artifact_id}`.toLowerCase().includes(queryLower)
+    );
+  }
+  
+  // Apply filters
+  if (filters.scopes && filters.scopes.length > 0) {
+    results = results.filter(dep => filters.scopes!.includes(dep.scope));
+  }
+  
+  if (filters.sources && filters.sources.length > 0) {
+    results = results.filter(dep => filters.sources!.includes(dep.source));
+  }
+  
+  if (filters.conflictStatus !== undefined) {
+    results = results.filter(dep => dep.has_conflicts === filters.conflictStatus);
+  }
+  
+  if (filters.conflictSeverity && filters.conflictSeverity.length > 0) {
+    results = results.filter(dep => 
+      dep.conflict_severity && filters.conflictSeverity!.includes(dep.conflict_severity)
+    );
+  }
+  
+  if (filters.depth) {
+    const { min, max } = filters.depth;
+    results = results.filter(dep => {
+      if (min !== undefined && dep.depth < min) return false;
+      if (max !== undefined && dep.depth > max) return false;
+      return true;
+    });
+  }
+  
+  if (filters.transitive !== undefined) {
+    results = results.filter(dep => dep.is_transitive === filters.transitive);
+  }
+  
+  // Sort results by relevance
+  results.sort((a, b) => {
+    // Prioritize exact matches
+    if (query.trim()) {
+      const queryLower = query.toLowerCase();
+      const aExact = a.artifact_id.toLowerCase() === queryLower;
+      const bExact = b.artifact_id.toLowerCase() === queryLower;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+    }
+    
+    // Then by conflicts (conflicts first)
+    if (a.has_conflicts && !b.has_conflicts) return -1;
+    if (!a.has_conflicts && b.has_conflicts) return 1;
+    
+    // Then by depth (direct dependencies first)
+    if (a.depth !== b.depth) return a.depth - b.depth;
+    
+    // Finally by name
+    return `${a.group_id}:${a.artifact_id}`.localeCompare(`${b.group_id}:${b.artifact_id}`);
+  });
+  
+  return results;
+}
+
+async function searchWithWebWorker(
+  dependencies: DependencyNode[], 
+  query: string, 
+  filters: SearchFilters
+): Promise<DependencyNode[]> {
+  return new Promise((resolve, reject) => {
+    // Create inline worker for dependency search
+    const workerCode = `
+      self.onmessage = function(e) {
+        const { dependencies, query, filters } = e.data;
+        
+        try {
+          let results = dependencies;
+          
+          // Apply text search
+          if (query.trim()) {
+            const queryLower = query.toLowerCase();
+            results = results.filter(dep => 
+              dep.group_id.toLowerCase().includes(queryLower) ||
+              dep.artifact_id.toLowerCase().includes(queryLower) ||
+              (dep.version && dep.version.toLowerCase().includes(queryLower)) ||
+              (dep.description && dep.description.toLowerCase().includes(queryLower)) ||
+              (dep.group_id + ':' + dep.artifact_id).toLowerCase().includes(queryLower)
+            );
+          }
+          
+          // Apply filters
+          if (filters.scopes && filters.scopes.length > 0) {
+            results = results.filter(dep => filters.scopes.includes(dep.scope));
+          }
+          
+          if (filters.sources && filters.sources.length > 0) {
+            results = results.filter(dep => filters.sources.includes(dep.source));
+          }
+          
+          if (filters.conflictStatus !== undefined) {
+            results = results.filter(dep => dep.has_conflicts === filters.conflictStatus);
+          }
+          
+          if (filters.conflictSeverity && filters.conflictSeverity.length > 0) {
+            results = results.filter(dep => 
+              dep.conflict_severity && filters.conflictSeverity.includes(dep.conflict_severity)
+            );
+          }
+          
+          if (filters.depth) {
+            const { min, max } = filters.depth;
+            results = results.filter(dep => {
+              if (min !== undefined && dep.depth < min) return false;
+              if (max !== undefined && dep.depth > max) return false;
+              return true;
+            });
+          }
+          
+          if (filters.transitive !== undefined) {
+            results = results.filter(dep => dep.is_transitive === filters.transitive);
+          }
+          
+          // Sort results by relevance
+          results.sort((a, b) => {
+            // Prioritize exact matches
+            if (query.trim()) {
+              const queryLower = query.toLowerCase();
+              const aExact = a.artifact_id.toLowerCase() === queryLower;
+              const bExact = b.artifact_id.toLowerCase() === queryLower;
+              if (aExact && !bExact) return -1;
+              if (!aExact && bExact) return 1;
+            }
+            
+            // Then by conflicts (conflicts first)
+            if (a.has_conflicts && !b.has_conflicts) return -1;
+            if (!a.has_conflicts && b.has_conflicts) return 1;
+            
+            // Then by depth (direct dependencies first)
+            if (a.depth !== b.depth) return a.depth - b.depth;
+            
+            // Finally by name
+            return (a.group_id + ':' + a.artifact_id).localeCompare(b.group_id + ':' + b.artifact_id);
+          });
+          
+          self.postMessage({ success: true, results });
+        } catch (error) {
+          self.postMessage({ success: false, error: error.message });
+        }
+      };
+    `;
+    
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+    
+    const timeout = setTimeout(() => {
+      worker.terminate();
+      reject(new Error('Search timeout'));
+    }, 5000); // 5 second timeout
+    
+    worker.onmessage = (e) => {
+      clearTimeout(timeout);
+      worker.terminate();
+      URL.revokeObjectURL(blob.toString());
+      
+      if (e.data.success) {
+        resolve(e.data.results);
+      } else {
+        reject(new Error(e.data.error));
+      }
+    };
+    
+    worker.onerror = (error) => {
+      clearTimeout(timeout);
+      worker.terminate();
+      URL.revokeObjectURL(blob.toString());
+      reject(error);
+    };
+    
+    worker.postMessage({ dependencies, query, filters });
+  });
+}

@@ -8,11 +8,16 @@ from typing import Dict, List, Set, Optional, Any, Tuple
 from enum import Enum
 import structlog
 from collections import defaultdict
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import time
 
 from ..models.jar import (
     DependencyNode, DependencyTree, DependencyConflict,
     DependencyScope, DependencySource, ConflictSeverity
 )
+from .cache_service import cache_service
+from .performance_monitoring_service import performance_service, monitor_performance
 
 logger = structlog.get_logger()
 
@@ -60,8 +65,10 @@ class DependencySearchService:
     def __init__(self):
         self.search_cache: Dict[str, List[SearchResult]] = {}
         self.index_cache: Dict[str, Dict[str, Set[str]]] = {}
+        self.executor = ThreadPoolExecutor(max_workers=2)  # For CPU-intensive indexing
     
-    def build_search_index(self, tree: DependencyTree) -> Dict[str, Set[str]]:
+    @monitor_performance("build_search_index")
+    async def build_search_index(self, tree: DependencyTree) -> Dict[str, Set[str]]:
         """
         Build search index for fast dependency lookup.
         
@@ -74,63 +81,94 @@ class DependencySearchService:
         logger.info("Building search index", jar_id=tree.jar_id, total_deps=tree.total_dependencies)
         
         # Check cache first
-        cache_key = f"{tree.jar_id}_{tree.total_dependencies}"
+        cache_key = f"{tree.jar_id}_{tree.total_dependencies}_{hash(str(sorted(tree.all_dependencies.keys())))}"
+        
+        # Try to get from Redis cache
+        cached_index = await cache_service.get_search_index(tree.jar_id, cache_key)
+        if cached_index:
+            logger.info("Using cached search index", jar_id=tree.jar_id)
+            # Convert back to sets
+            return {term: set(dep_ids) for term, dep_ids in cached_index.items()}
+        
+        # Check in-memory cache
         if cache_key in self.index_cache:
             return self.index_cache[cache_key]
         
-        index = defaultdict(set)
-        
-        for dep_id, dependency in tree.all_dependencies.items():
-            # Index searchable fields
-            searchable_terms = []
+        async with performance_service.monitor_operation(
+            "build_search_index_full",
+            {"jar_id": tree.jar_id, "total_deps": tree.total_dependencies}
+        ):
+            # Build index in thread pool for CPU-intensive work
+            def build_index():
+                index = defaultdict(set)
+                
+                for dep_id, dependency in tree.all_dependencies.items():
+                    # Index searchable fields
+                    searchable_terms = []
+                    
+                    # Add basic fields
+                    if dependency.group_id:
+                        searchable_terms.extend(self._tokenize(dependency.group_id))
+                    if dependency.artifact_id:
+                        searchable_terms.extend(self._tokenize(dependency.artifact_id))
+                    if dependency.version:
+                        searchable_terms.extend(self._tokenize(dependency.version))
+                    if dependency.description:
+                        searchable_terms.extend(self._tokenize(dependency.description))
+                    
+                    # Add composite terms
+                    searchable_terms.append(dependency.name.lower())  # group:artifact
+                    searchable_terms.append(dependency.coordinate.lower())  # group:artifact:version
+                    
+                    # Add scope and source
+                    searchable_terms.append(dependency.scope.value.lower())
+                    searchable_terms.append(dependency.source.value.lower())
+                    
+                    # Add conflict status terms
+                    if dependency.has_conflicts:
+                        searchable_terms.append("conflict")
+                        searchable_terms.append("conflicts")
+                        if dependency.conflict_severity:
+                            searchable_terms.append(dependency.conflict_severity.value.lower())
+                    
+                    # Add transitive status
+                    if dependency.is_transitive:
+                        searchable_terms.append("transitive")
+                    else:
+                        searchable_terms.append("direct")
+                    
+                    # Index all terms
+                    for term in searchable_terms:
+                        if term:
+                            index[term.lower()].add(dep_id)
+                
+                return dict(index)
             
-            # Add basic fields
-            if dependency.group_id:
-                searchable_terms.extend(self._tokenize(dependency.group_id))
-            if dependency.artifact_id:
-                searchable_terms.extend(self._tokenize(dependency.artifact_id))
-            if dependency.version:
-                searchable_terms.extend(self._tokenize(dependency.version))
-            if dependency.description:
-                searchable_terms.extend(self._tokenize(dependency.description))
+            # Run indexing in thread pool
+            loop = asyncio.get_event_loop()
+            index = await loop.run_in_executor(self.executor, build_index)
             
-            # Add composite terms
-            searchable_terms.append(dependency.name.lower())  # group:artifact
-            searchable_terms.append(dependency.coordinate.lower())  # group:artifact:version
+            # Cache the index (both in-memory and Redis)
+            self.index_cache[cache_key] = index
             
-            # Add scope and source
-            searchable_terms.append(dependency.scope.value.lower())
-            searchable_terms.append(dependency.source.value.lower())
+            # Convert sets to lists for JSON serialization
+            serializable_index = {term: list(dep_ids) for term, dep_ids in index.items()}
+            await cache_service.set_search_index(
+                tree.jar_id, 
+                cache_key, 
+                serializable_index, 
+                ttl=7200  # 2 hours
+            )
             
-            # Add conflict status terms
-            if dependency.has_conflicts:
-                searchable_terms.append("conflict")
-                searchable_terms.append("conflicts")
-                if dependency.conflict_severity:
-                    searchable_terms.append(dependency.conflict_severity.value.lower())
+            logger.info("Search index built", 
+                       jar_id=tree.jar_id, 
+                       indexed_terms=len(index),
+                       total_deps=tree.total_dependencies)
             
-            # Add transitive status
-            if dependency.is_transitive:
-                searchable_terms.append("transitive")
-            else:
-                searchable_terms.append("direct")
-            
-            # Index all terms
-            for term in searchable_terms:
-                if term:
-                    index[term.lower()].add(dep_id)
-        
-        # Cache the index
-        self.index_cache[cache_key] = dict(index)
-        
-        logger.info("Search index built", 
-                   jar_id=tree.jar_id, 
-                   indexed_terms=len(index),
-                   total_deps=tree.total_dependencies)
-        
-        return dict(index)
+            return index
     
-    def search_dependencies(
+    @monitor_performance("search_dependencies")
+    async def search_dependencies(
         self,
         tree: DependencyTree,
         query: str,
@@ -160,20 +198,61 @@ class DependencySearchService:
                    fields=fields)
         
         # Check cache
-        cache_key = f"{tree.jar_id}_{query}_{fields}_{max_results}"
+        cache_key = f"{tree.jar_id}_{query}_{fields}_{max_results}_{highlight}"
         if cache_key in self.search_cache:
             return self.search_cache[cache_key]
         
-        if fields is None:
-            fields = [SearchField.ALL]
-        
-        # Build search index if not cached
-        search_index = self.build_search_index(tree)
-        
-        # Find matching dependencies
-        matching_deps = self._find_matching_dependencies(tree, query, fields, search_index)
-        
-        # Score and rank results
+        async with performance_service.monitor_operation(
+            "search_dependencies_full",
+            {"jar_id": tree.jar_id, "query": query, "max_results": max_results}
+        ):
+            if fields is None:
+                fields = [SearchField.ALL]
+            
+            # Build search index if not cached
+            search_index = await self.build_search_index(tree)
+            
+            # Find matching dependencies
+            matching_deps = await self._find_matching_dependencies(tree, query, fields, search_index)
+            
+            # Score and rank results in thread pool for large result sets
+            if len(matching_deps) > 50:
+                results = await self._score_and_rank_results_async(
+                    tree, matching_deps, query, highlight
+                )
+            else:
+                results = self._score_and_rank_results_sync(
+                    tree, matching_deps, query, highlight
+                )
+            
+            # Limit results
+            results = results[:max_results]
+            
+            # Cache results (with TTL to prevent stale data)
+            self.search_cache[cache_key] = results
+            
+            # Clean cache if it gets too large
+            if len(self.search_cache) > 1000:
+                # Remove oldest 20% of entries
+                keys_to_remove = list(self.search_cache.keys())[:200]
+                for key in keys_to_remove:
+                    del self.search_cache[key]
+            
+            logger.info("Search completed", 
+                       jar_id=tree.jar_id, 
+                       query=query, 
+                       results_count=len(results))
+            
+            return results
+    
+    def _score_and_rank_results_sync(
+        self, 
+        tree: DependencyTree, 
+        matching_deps: Dict[str, List[Dict[str, Any]]], 
+        query: str, 
+        highlight: bool
+    ) -> List[SearchResult]:
+        """Score and rank results synchronously."""
         results = []
         for dep_id, matches in matching_deps.items():
             dependency = tree.all_dependencies[dep_id]
@@ -188,18 +267,51 @@ class DependencySearchService:
         
         # Sort by score (descending)
         results.sort(key=lambda x: x.score, reverse=True)
+        return results
+    
+    async def _score_and_rank_results_async(
+        self, 
+        tree: DependencyTree, 
+        matching_deps: Dict[str, List[Dict[str, Any]]], 
+        query: str, 
+        highlight: bool
+    ) -> List[SearchResult]:
+        """Score and rank results asynchronously for large result sets."""
+        def score_batch(batch_items):
+            batch_results = []
+            for dep_id, matches in batch_items:
+                dependency = tree.all_dependencies[dep_id]
+                score = self._calculate_relevance_score(dependency, query, matches)
+                
+                if highlight:
+                    highlighted_matches = self._highlight_matches(dependency, query, matches)
+                else:
+                    highlighted_matches = matches
+                
+                batch_results.append(SearchResult(dependency, highlighted_matches, score))
+            return batch_results
         
-        # Limit results
-        results = results[:max_results]
+        # Process in batches
+        items = list(matching_deps.items())
+        batch_size = 25
+        tasks = []
         
-        # Cache results
-        self.search_cache[cache_key] = results
+        loop = asyncio.get_event_loop()
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i + batch_size]
+            task = loop.run_in_executor(self.executor, score_batch, batch)
+            tasks.append(task)
         
-        logger.info("Search completed", 
-                   jar_id=tree.jar_id, 
-                   query=query, 
-                   results_count=len(results))
+        # Wait for all batches to complete
+        batch_results = await asyncio.gather(*tasks)
         
+        # Flatten results
+        results = []
+        for batch in batch_results:
+            results.extend(batch)
+        
+        # Sort by score (descending)
+        results.sort(key=lambda x: x.score, reverse=True)
         return results
     
     def filter_dependencies(
@@ -308,7 +420,7 @@ class DependencySearchService:
         
         return tokens
     
-    def _find_matching_dependencies(
+    async def _find_matching_dependencies(
         self,
         tree: DependencyTree,
         query: str,
@@ -321,7 +433,7 @@ class DependencySearchService:
         
         matching_deps = defaultdict(list)
         
-        # Direct term matching using index
+        # Direct term matching using index (fast path)
         for token in query_tokens:
             if token in search_index:
                 for dep_id in search_index[token]:
@@ -331,7 +443,29 @@ class DependencySearchService:
                         "type": "token"
                     })
         
-        # Field-specific matching
+        # Field-specific matching (for exact substring matches)
+        # Run in thread pool for large dependency trees
+        if len(tree.all_dependencies) > 100:
+            field_matches = await self._find_field_matches_async(tree, query, fields, query_lower)
+        else:
+            field_matches = self._find_field_matches_sync(tree, query, fields, query_lower)
+        
+        # Merge field matches with index matches
+        for dep_id, matches in field_matches.items():
+            matching_deps[dep_id].extend(matches)
+        
+        return dict(matching_deps)
+    
+    def _find_field_matches_sync(
+        self, 
+        tree: DependencyTree, 
+        query: str, 
+        fields: List[SearchField], 
+        query_lower: str
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Find field matches synchronously."""
+        matching_deps = defaultdict(list)
+        
         for dep_id, dependency in tree.all_dependencies.items():
             field_matches = []
             
@@ -376,9 +510,89 @@ class DependencySearchService:
                     })
             
             if field_matches:
-                matching_deps[dep_id].extend(field_matches)
+                matching_deps[dep_id] = field_matches
         
         return dict(matching_deps)
+    
+    async def _find_field_matches_async(
+        self, 
+        tree: DependencyTree, 
+        query: str, 
+        fields: List[SearchField], 
+        query_lower: str
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Find field matches asynchronously for large dependency trees."""
+        def process_batch(batch_items):
+            batch_matches = defaultdict(list)
+            
+            for dep_id, dependency in batch_items:
+                field_matches = []
+                
+                if SearchField.ALL in fields or SearchField.GROUP_ID in fields:
+                    if dependency.group_id and query_lower in dependency.group_id.lower():
+                        field_matches.append({
+                            "field": "group_id",
+                            "match": query,
+                            "type": "substring"
+                        })
+                
+                if SearchField.ALL in fields or SearchField.ARTIFACT_ID in fields:
+                    if dependency.artifact_id and query_lower in dependency.artifact_id.lower():
+                        field_matches.append({
+                            "field": "artifact_id", 
+                            "match": query,
+                            "type": "substring"
+                        })
+                
+                if SearchField.ALL in fields or SearchField.VERSION in fields:
+                    if dependency.version and query_lower in dependency.version.lower():
+                        field_matches.append({
+                            "field": "version",
+                            "match": query,
+                            "type": "substring"
+                        })
+                
+                if SearchField.ALL in fields or SearchField.NAME in fields:
+                    if query_lower in dependency.name.lower():
+                        field_matches.append({
+                            "field": "name",
+                            "match": query,
+                            "type": "substring"
+                        })
+                
+                if SearchField.ALL in fields or SearchField.DESCRIPTION in fields:
+                    if dependency.description and query_lower in dependency.description.lower():
+                        field_matches.append({
+                            "field": "description",
+                            "match": query,
+                            "type": "substring"
+                        })
+                
+                if field_matches:
+                    batch_matches[dep_id] = field_matches
+            
+            return dict(batch_matches)
+        
+        # Process in batches
+        items = list(tree.all_dependencies.items())
+        batch_size = 50
+        tasks = []
+        
+        loop = asyncio.get_event_loop()
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i + batch_size]
+            task = loop.run_in_executor(self.executor, process_batch, batch)
+            tasks.append(task)
+        
+        # Wait for all batches to complete
+        batch_results = await asyncio.gather(*tasks)
+        
+        # Merge results
+        all_matches = {}
+        for batch_matches in batch_results:
+            all_matches.update(batch_matches)
+        
+        return all_matches
     
     def _calculate_relevance_score(
         self,
