@@ -12,7 +12,7 @@ import {
   CubeIcon,
   LinkIcon
 } from '@heroicons/react/24/outline';
-import { SearchFilters, DependencyNode, DependencyTree } from '@/stores/singleJarDashboardStore';
+import { SearchFilters, DependencyNode, DependencyTree } from '../stores/singleJarDashboardStore';
 
 interface DependencySearchProps {
   searchQuery: string;

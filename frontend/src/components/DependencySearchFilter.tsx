@@ -6,12 +6,12 @@ import {
   ChevronDownIcon,
   ChevronUpIcon
 } from '@heroicons/react/24/outline';
-import { SearchFilters, DependencyTree } from '@/stores/singleJarDashboardStore';
+import { SearchFilters, DependencyTree } from '../stores/singleJarDashboardStore';
 
 interface DependencySearchFilterProps {
   filters: SearchFilters;
   onFiltersChange: (filters: SearchFilters) => void;
-  dependencyTree: DependencyTree;
+  dependencyTree: DependencyTree | undefined;
   className?: string;
 }
 
@@ -24,9 +24,23 @@ const DependencySearchFilter: React.FC<DependencySearchFilterProps> = ({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['scope', 'source']));
 
   // Available filter options based on dependency tree data
-  const availableScopes = Object.keys(dependencyTree.scope_counts || {});
-  const availableSources = Object.keys(dependencyTree.source_counts || {});
+  const availableScopes = Object.keys(dependencyTree?.scope_counts || {});
+  const availableSources = Object.keys(dependencyTree?.source_counts || {});
   const availableSeverities = ['low', 'medium', 'high', 'critical'];
+
+  // If no dependency tree data, show a loading or empty state
+  if (!dependencyTree) {
+    return (
+      <div className={`bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 ${className}`}>
+        <div className="flex items-center justify-center text-gray-500 dark:text-gray-400">
+          <div className="text-center">
+            <AdjustmentsHorizontalIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">No dependency data available for filtering</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Toggle section expansion
   const toggleSection = useCallback((section: string) => {

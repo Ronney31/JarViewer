@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import DependencySearch from './DependencySearch';
 import DependencyTreeView from './DependencyTreeView';
-import { SearchFilters, DependencyNode, DependencyTree } from '@/stores/singleJarDashboardStore';
+import { SearchFilters, DependencyNode, DependencyTree } from '../stores/singleJarDashboardStore';
 
 // Demo component to showcase the search and filter functionality
 const DependencySearchDemo: React.FC = () => {

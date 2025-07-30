@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
-import { DependencyNode, DependencyTree } from '@/stores/singleJarDashboardStore';
+import { DependencyNode, DependencyTree } from '../stores/singleJarDashboardStore';
 
 interface ProgressiveTreeLoaderProps {
   dependencyTree: DependencyTree;

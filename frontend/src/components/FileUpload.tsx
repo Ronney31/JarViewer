@@ -4,7 +4,7 @@ import { Upload, FileArchive, AlertCircle } from 'lucide-react'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 
-import { useJarViewerStore } from '@/stores/jarViewerStore'
+import { useJarViewerStore } from '../stores/jarViewerStore'
 
 export function FileUpload() {
   const { loadJar, isLoading } = useJarViewerStore()

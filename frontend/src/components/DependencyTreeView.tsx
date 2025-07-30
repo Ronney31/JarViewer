@@ -17,7 +17,7 @@ import {
   DependencyNode, 
   DependencyTree, 
   SearchFilters 
-} from '@/stores/singleJarDashboardStore';
+} from '../stores/singleJarDashboardStore';
 import ProgressiveTreeLoader from './ProgressiveTreeLoader';
 
 // Context for sharing tree state with nested components
@@ -429,7 +429,7 @@ const DependencyTreeView: React.FC<DependencyTreeViewProps> = ({
             <div className="w-80 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
               <DependencyDetailsPanel 
                 dependency={selectedDependencyDetails}
-                onClose={() => onDependencySelect(null)}
+                onClose={() => onDependencySelect('')}
               />
             </div>
           )}

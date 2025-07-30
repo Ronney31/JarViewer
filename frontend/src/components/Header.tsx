@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Moon, Sun, FileArchive, Settings, Info, X, Code2, Package } from 'lucide-react'
 import { useTheme } from './ThemeProvider'
-import { useJarViewerStore } from '@/stores/jarViewerStore'
+import { useJarViewerStore } from '../stores/jarViewerStore'
 
 type ViewMode = 'files' | 'dependencies';
 

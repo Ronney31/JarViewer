@@ -1,5 +1,5 @@
 import { Activity, Clock, HardDrive, Code2, Package } from 'lucide-react'
-import { useJarViewerStore } from '@/stores/jarViewerStore'
+import { useJarViewerStore } from '../stores/jarViewerStore'
 
 type ViewMode = 'files' | 'dependencies';
 

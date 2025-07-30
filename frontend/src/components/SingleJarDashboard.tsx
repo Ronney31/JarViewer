@@ -9,18 +9,19 @@ import {
   Info,
   ChevronDown,
   ChevronRight,
-  RefreshCw,
-  X
+  RefreshCw
 } from 'lucide-react';
-import { useJarViewerStore } from '@/stores/jarViewerStore';
-import { useSingleJarDashboardStore } from '@/stores/singleJarDashboardStore';
+import { useJarViewerStore } from '../stores/jarViewerStore';
+import { useSingleJarDashboardStore } from '../stores/singleJarDashboardStore';
 import DependencyTreeView from './DependencyTreeView';
 import DependencySearchFilter from './DependencySearchFilter';
 import ConflictVisualization from './ConflictVisualization';
 import ExportControls from './ExportControls';
 import LoadingIndicator from './LoadingIndicator';
 import ErrorBoundary from './ErrorBoundary';
-import { AnalysisError } from '@/types/errors';
+import ErrorDisplay from './ErrorDisplay';
+import OverviewSection from './OverviewSection';
+import { AnalysisError } from '../types/errors';
 
 interface SingleJarDashboardProps {
   jarId: string;
@@ -99,6 +100,59 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
     cancelAnalysis(jarId);
   }, [cancelAnalysis, jarId]);
 
+  // Handle tile clicks from overview
+  const handleOverviewTileClick = useCallback((tileId: string) => {
+    switch (tileId) {
+      case 'total_dependencies':
+      case 'direct_dependencies':
+      case 'transitive_dependencies':
+        setActiveSection('tree');
+        break;
+      case 'conflicts':
+        setActiveSection('conflicts');
+        break;
+      case 'search':
+        setShowFilters(true);
+        break;
+      case 'filter':
+        setShowFilters(true);
+        break;
+      case 'export':
+        setActiveSection('export');
+        break;
+      default:
+        break;
+    }
+  }, []);
+
+  // Transform DependencyConflict[] to Conflict[] for ConflictVisualization component
+  const transformConflictsForVisualization = useCallback((conflicts: any[]) => {
+    if (!conflicts) return [];
+    
+    return conflicts.map(conflict => ({
+      ...conflict,
+      severity: normalizeSeverity(conflict.severity)
+    }));
+  }, []);
+
+  // Normalize severity string to expected union type
+  const normalizeSeverity = (severity: string): 'low' | 'medium' | 'high' | 'critical' => {
+    const normalizedSeverity = severity.toLowerCase().trim();
+    switch (normalizedSeverity) {
+      case 'critical':
+        return 'critical';
+      case 'high':
+        return 'high';
+      case 'medium':
+        return 'medium';
+      case 'low':
+        return 'low';
+      default:
+        // Default to medium for unknown severity levels
+        return 'medium';
+    }
+  };
+
   // Handle error from error boundary
   const handleErrorBoundaryError = useCallback((error: AnalysisError) => {
     console.error('Error boundary caught error:', error);
@@ -122,47 +176,27 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
   if (error && !partialResult && !analysisData) {
     return (
       <div className={`single-jar-dashboard ${className}`}>
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
-          <div className="flex items-start space-x-3">
-            <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <h3 className="text-lg font-medium text-red-800 dark:text-red-200">
-                Analysis Failed
-              </h3>
-              <p className="mt-2 text-red-700 dark:text-red-300">
-                {error.message}
-              </p>
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                {error.suggestedAction}
-              </p>
-              
-              {error.details?.retryAttempt && (
-                <div className="mt-2 text-sm text-red-600 dark:text-red-400">
-                  Attempt {error.details.retryAttempt} of {error.details.maxAttempts}
-                </div>
-              )}
-              
-              <div className="mt-4 flex space-x-3">
-                {canRetry && (
-                  <button
-                    onClick={handleRetry}
-                    className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Retry Analysis
-                  </button>
-                )}
-                <button
-                  onClick={clearError}
-                  className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ErrorDisplay
+          error={{
+            type: 'error',
+            title: 'Analysis Failed',
+            message: error.message,
+            details: error.details?.stack_trace || error.details?.context,
+            actions: [
+              ...(canRetry ? [{
+                label: 'Retry Analysis',
+                action: handleRetry,
+                variant: 'primary' as const
+              }] : []),
+              {
+                label: 'Dismiss',
+                action: clearError,
+                variant: 'secondary' as const
+              }
+            ]
+          }}
+          overlay={true}
+        />
       </div>
     );
   }
@@ -199,115 +233,89 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
 
   return (
     <ErrorBoundary onError={handleErrorBoundaryError}>
-      <div className={`single-jar-dashboard ${className} space-y-6`}>
+      <div className={`single-jar-dashboard ${className} space-y-4`}>
         {/* Partial Analysis Warning */}
-        {partialResult && partialResult.hasErrors && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4"
-          >
-            <div className="flex items-start space-x-3">
-              <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                  Partial Analysis Results
-                </h3>
-                <p className="mt-1 text-sm text-yellow-700 dark:text-yellow-300">
-                  Analysis completed with {partialResult.errors.length} issue(s). 
-                  Some features may be limited.
-                </p>
-                {partialResult.degradedFeatures.length > 0 && (
-                  <div className="mt-2">
-                    <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                      Limited features: {partialResult.degradedFeatures.join(', ')}
-                    </p>
-                  </div>
-                )}
-                <div className="mt-3 flex space-x-3">
-                  <button
-                    onClick={handleRetry}
-                    className="text-sm bg-yellow-600 text-white px-3 py-1 rounded hover:bg-yellow-700 transition-colors"
-                  >
-                    Retry Full Analysis
-                  </button>
-                  <button
-                    onClick={clearAllErrors}
-                    className="text-sm text-yellow-700 dark:text-yellow-300 hover:text-yellow-900 dark:hover:text-yellow-100"
-                  >
-                    Continue with Available Data
-                  </button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
+        <AnimatePresence>
+          {partialResult && partialResult.hasErrors && (
+            <ErrorDisplay
+              error={{
+                type: 'warning',
+                title: 'Partial Analysis Results',
+                message: `Analysis completed with ${partialResult.errors.length} issue(s). Some features may be limited.`,
+                details: partialResult.degradedFeatures.length > 0 
+                  ? `Limited features: ${partialResult.degradedFeatures.join(', ')}`
+                  : undefined,
+                actions: [
+                  {
+                    label: 'Retry Full Analysis',
+                    action: handleRetry,
+                    variant: 'primary' as const
+                  },
+                  {
+                    label: 'Continue with Available Data',
+                    action: clearAllErrors,
+                    variant: 'secondary' as const
+                  }
+                ]
+              }}
+              overlay={true}
+              onDismiss={clearAllErrors}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Multiple Errors Display */}
-        {errors.length > 1 && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4"
-          >
-            <div className="flex items-start space-x-3">
-              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
-                  Multiple Issues Detected
-                </h3>
-                <div className="mt-2 space-y-1">
-                  {errors.slice(0, 3).map((err, index) => (
-                    <p key={index} className="text-sm text-red-700 dark:text-red-300">
-                      • {err.message}
-                    </p>
-                  ))}
-                  {errors.length > 3 && (
-                    <p className="text-sm text-red-600 dark:text-red-400">
-                      ... and {errors.length - 3} more issues
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={clearAllErrors}
-                  className="mt-2 text-sm text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-100"
-                >
-                  Dismiss All
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
+        <AnimatePresence>
+          {errors.length > 1 && (
+            <ErrorDisplay
+              error={{
+                type: 'error',
+                title: 'Multiple Issues Detected',
+                message: errors.slice(0, 3).map(err => `• ${err.message}`).join('\n'),
+                details: errors.length > 3 ? `... and ${errors.length - 3} more issues` : undefined,
+                actions: [
+                  {
+                    label: 'Dismiss All',
+                    action: clearAllErrors,
+                    variant: 'secondary'
+                  }
+                ]
+              }}
+              overlay={true}
+              onDismiss={clearAllErrors}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Header */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              Dependency Analysis
-            </h1>
-            <p className="mt-1 text-gray-600 dark:text-gray-400">
-              {currentJar?.name || `JAR ${jarId}`}
-            </p>
-          </div>
-          <div className="flex items-center space-x-2">
-            {summary?.risk_level && (
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                summary.risk_level === 'high' 
-                  ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
-                  : summary.risk_level === 'medium'
-                  ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
-                  : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-              }`}>
-                Risk: {summary.risk_level}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                Dependency Analysis
+              </h1>
+              <span className="text-sm text-gray-600 dark:text-gray-400">
+                {currentJar?.name || `JAR ${jarId}`}
               </span>
-            )}
+            </div>
+            <div className="flex items-center space-x-2">
+              {summary?.risk_level && (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  summary.risk_level === 'high' 
+                    ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
+                    : summary.risk_level === 'medium'
+                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                    : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                }`}>
+                  Risk: {summary.risk_level}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Navigation Tabs */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 sticky top-0 z-10">
         <div className="border-b border-gray-200 dark:border-gray-700">
           <nav className="-mb-px flex flex-wrap sm:space-x-8 px-4 sm:px-6">
             {[
@@ -342,7 +350,7 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
         </div>
 
         {/* Tab Content */}
-        <div className="p-6 max-h-[calc(100vh-16rem)] overflow-y-auto">
+        <div className="p-4 h-[calc(100vh-20rem)] overflow-y-auto">
           <AnimatePresence mode="wait">
             {activeSection === 'overview' && (
               <motion.div
@@ -353,8 +361,8 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
                 transition={{ duration: 0.2 }}
               >
                 <OverviewSection 
-                  summary={summary} 
-                  dependencyTree={dependencyTree}
+                  analysisData={analysisData}
+                  onTileClick={handleOverviewTileClick}
                 />
               </motion.div>
             )}
@@ -463,7 +471,7 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
               >
                 {conflicts && dependencyTree ? (
                   <ConflictVisualization
-                    conflicts={conflicts}
+                    conflicts={transformConflictsForVisualization(conflicts)}
                     dependencyTree={dependencyTree}
                   />
                 ) : (
@@ -530,142 +538,6 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
       </div>
       </div>
     </ErrorBoundary>
-  );
-};
-
-// Overview Section Component
-const OverviewSection: React.FC<{
-  summary: any;
-  dependencyTree: any;
-}> = ({ summary, dependencyTree }) => {
-  const stats = [
-    {
-      label: 'Total Dependencies',
-      value: summary?.total_dependencies || 0,
-      icon: BarChart3,
-      color: 'blue'
-    },
-    {
-      label: 'Direct Dependencies',
-      value: summary?.direct_dependencies || 0,
-      icon: BarChart3,
-      color: 'green'
-    },
-    {
-      label: 'Transitive Dependencies',
-      value: summary?.transitive_dependencies || 0,
-      icon: BarChart3,
-      color: 'yellow'
-    },
-    {
-      label: 'Conflicts',
-      value: summary?.conflicts_count || 0,
-      icon: AlertTriangle,
-      color: (summary?.conflicts_count || 0) > 0 ? 'red' : 'gray'
-    }
-  ];
-
-  return (
-    <div className="space-y-6">
-      {/* Statistics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <div
-              key={index}
-              className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600"
-            >
-              <div className="flex items-center">
-                <div className={`p-2 rounded-md bg-${stat.color}-100 dark:bg-${stat.color}-900/20`}>
-                  <Icon className={`h-6 w-6 text-${stat.color}-600 dark:text-${stat.color}-400`} />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                    {stat.label}
-                  </p>
-                  <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                    {stat.value}
-                  </p>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Scope Breakdown */}
-      {summary?.scope_breakdown && Object.keys(summary.scope_breakdown).length > 0 && (
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 border border-gray-200 dark:border-gray-600">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-            Scope Breakdown
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            {Object.entries(summary.scope_breakdown).map(([scope, count]) => (
-              <div key={scope} className="text-center">
-                <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                  {count as number}
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400 capitalize">
-                  {scope}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Source Breakdown */}
-      {summary?.source_breakdown && Object.keys(summary.source_breakdown).length > 0 && (
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 border border-gray-200 dark:border-gray-600">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-            Source Breakdown
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {Object.entries(summary.source_breakdown).map(([source, count]) => (
-              <div key={source} className="text-center">
-                <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                  {count as number}
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400 capitalize">
-                  {source.replace('_', ' ')}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Risk Assessment */}
-      {summary?.risk_level && (
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 border border-gray-200 dark:border-gray-600">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-            Risk Assessment
-          </h3>
-          <div className="flex items-center space-x-4">
-            <div className={`flex-shrink-0 w-4 h-4 rounded-full ${
-              summary.risk_level === 'high' 
-                ? 'bg-red-500'
-                : summary.risk_level === 'medium'
-                ? 'bg-yellow-500'
-                : 'bg-green-500'
-            }`}></div>
-            <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                Risk Level: <span className="capitalize">{summary.risk_level}</span>
-              </p>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {summary.risk_level === 'high' 
-                  ? 'Multiple conflicts detected. Review dependencies carefully.'
-                  : summary.risk_level === 'medium'
-                  ? 'Some conflicts detected. Consider reviewing affected dependencies.'
-                  : 'No significant conflicts detected. Dependencies appear compatible.'}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
   );
 };
 

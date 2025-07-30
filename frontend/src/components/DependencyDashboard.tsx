@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { jarService } from '@/services/jarService';
+import { jarService } from '../services/jarService';
 import { 
   Package, 
   AlertTriangle, 
@@ -16,6 +16,7 @@ import {
   ChevronRight,
   RefreshCw
 } from 'lucide-react';
+import ErrorDisplay from './ErrorDisplay';
 
 interface VersionInfo {
   name: string;
@@ -244,7 +245,7 @@ ${index + 1}. ${dep.artifact_id || dep.name}
    Type: ${dep.is_transitive ? 'Transitive' : 'Direct'}
    Confidence: ${dep.confidence ? Math.round(dep.confidence * 100) + '%' : 'N/A'}
    ${dep.description ? `Description: ${dep.description}` : ''}
-   ${dep.package_imports && dep.package_imports.length > 0 ? `Packages: ${dep.package_imports.slice(0, 3).join(', ')}${dep.package_imports.length > 3 ? '...' : ''}` : ''}
+   ${dep.package_imports?.length ? `Packages: ${dep.package_imports.slice(0, 3).join(', ')}${dep.package_imports.length > 3 ? '...' : ''}` : ''}
 `).join('\n')}`;
         filename = `dependencies-${new Date().toISOString().split('T')[0]}.txt`;
         mimeType = 'text/plain';
@@ -559,26 +560,20 @@ ${index + 1}. ${dep.artifact_id || dep.name}
 
         {error && !loading && (
           <div className="p-4">
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-              <div className="flex items-start space-x-3">
-                <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
-                    Analysis Failed
-                  </h3>
-                  <p className="mt-1 text-sm text-red-700 dark:text-red-300">
-                    {error}
-                  </p>
-                  <button
-                    onClick={loadComprehensiveData}
-                    className="mt-3 inline-flex items-center px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm"
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Retry Analysis
-                  </button>
-                </div>
-              </div>
-            </div>
+            <ErrorDisplay
+              error={{
+                type: 'error',
+                title: 'Analysis Failed',
+                message: error,
+                actions: [
+                  {
+                    label: 'Retry Analysis',
+                    action: loadComprehensiveData,
+                    variant: 'primary'
+                  }
+                ]
+              }}
+            />
           </div>
         )}
 
@@ -1125,7 +1120,7 @@ ${index + 1}. ${dep.artifact_id || dep.name}
                             <div className="text-xs text-gray-400">Depth: {dep.depth}</div>
                           )}
                           {/* Package count indicator */}
-                          {dep.package_imports && dep.package_imports.length > 0 && (
+                          {dep.package_imports?.length && (
                             <div className="text-xs text-gray-500 flex items-center mt-1">
                               <Package className="w-3 h-3 mr-1" />
                               {dep.package_imports.length} packages
@@ -1226,7 +1221,7 @@ ${index + 1}. ${dep.artifact_id || dep.name}
                           </div>
                           
                           {/* Additional metadata */}
-                          {(dep.description || dep.license || (dep.package_imports && dep.package_imports.length > 0)) && (
+                          {(dep.description || dep.license || dep.package_imports?.length) && (
                             <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                               {dep.description && (
                                 <div className="text-xs">
@@ -1242,7 +1237,7 @@ ${index + 1}. ${dep.artifact_id || dep.name}
                                   </span>
                                 </div>
                               )}
-                              {dep.package_imports && dep.package_imports.length > 0 && (
+                              {dep.package_imports?.length && (
                                 <div className="text-xs">
                                   <span className="font-medium text-gray-600 dark:text-gray-400 flex items-center">
                                     <Package className="w-3 h-3 mr-1" />
@@ -1269,7 +1264,7 @@ ${index + 1}. ${dep.artifact_id || dep.name}
                               {dep.description}
                             </p>
                           )}
-                          {dep.package_imports && dep.package_imports.length > 0 && (
+                          {dep.package_imports?.length && (
                             <div className="mt-2">
                               <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                                 Package Imports:

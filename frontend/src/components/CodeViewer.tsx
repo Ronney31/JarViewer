@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Copy, Download, Eye, Code2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-import { useJarViewerStore } from '@/stores/jarViewerStore'
+import { useJarViewerStore } from '../stores/jarViewerStore'
 import { useTheme } from './ThemeProvider'
 
 export function CodeViewer() {

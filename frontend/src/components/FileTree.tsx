@@ -12,8 +12,8 @@ import {
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-import { useJarViewerStore } from '@/stores/jarViewerStore'
-import type { FileNode } from '@/types'
+import { useJarViewerStore } from '../stores/jarViewerStore'
+import type { FileNode } from '../types'
 
 interface FileTreeItemProps {
   node: FileNode

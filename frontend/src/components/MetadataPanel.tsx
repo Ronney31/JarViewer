@@ -1,5 +1,5 @@
 import { Info, Package, Shield, Clock, BarChart3, ArrowRight } from 'lucide-react'
-import { useJarViewerStore } from '@/stores/jarViewerStore'
+import { useJarViewerStore } from '../stores/jarViewerStore'
 
 interface MetadataPanelProps {
   onNavigateToDependencies?: () => void;

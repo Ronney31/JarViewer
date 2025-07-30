@@ -28,6 +28,7 @@ interface Conflict {
 
 interface ConflictVisualizationProps {
   conflicts: Conflict[];
+  dependencyTree?: any; // Add dependencyTree prop
   onConflictSelect?: (conflict: Conflict) => void;
 }
 
@@ -43,6 +44,7 @@ type SortDirection = 'asc' | 'desc';
 
 const ConflictVisualization: React.FC<ConflictVisualizationProps> = ({ 
   conflicts, 
+  dependencyTree,
   onConflictSelect 
 }) => {
   const [filters, setFilters] = useState<ConflictFilters>({
