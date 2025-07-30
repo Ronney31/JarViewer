@@ -1,9 +1,10 @@
 import type { JarFile, FileNode, JarMetadata } from '@/types'
+import { dataTransformationService, type BackendAnalysisResponse, type AnalysisData } from './dataTransformationService'
 
-// Try multiple API endpoints as fallback
+// Try multiple API endpoints as fallback (updated to use correct port)
 const API_ENDPOINTS = [
   '/api/v1', // Proxy first
-  'http://localhost:8000/api/v1' // Direct fallback
+  'http://localhost:9000/api/v1' // Direct fallback (corrected port for Docker)
 ]
 
 console.log('🔧 JarService: Available API endpoints:', API_ENDPOINTS)
@@ -12,30 +13,13 @@ export class JarService {
   private apiBase: string = API_ENDPOINTS[0]
   
   /**
-   * Try to find a working API endpoint
+   * Set the working API endpoint (simplified - no health check needed)
    */
   private async findWorkingEndpoint(): Promise<string> {
-    for (const endpoint of API_ENDPOINTS) {
-      try {
-        console.log('🔍 Testing endpoint:', endpoint)
-        const response = await fetch(`${endpoint}/health`, { 
-          method: 'GET',
-          signal: AbortSignal.timeout(5000) // 5 second timeout
-        })
-        if (response.ok) {
-          console.log('✅ Working endpoint found:', endpoint)
-          this.apiBase = endpoint
-          return endpoint
-        }
-      } catch (error) {
-        console.log('❌ Endpoint failed:', endpoint, error.message)
-      }
-    }
-    
-    // If no endpoint works, use the first one and let the error bubble up
-    console.warn('⚠️ No working endpoint found, using default:', API_ENDPOINTS[0])
-    this.apiBase = API_ENDPOINTS[0]
-    return API_ENDPOINTS[0]
+    // Use the direct backend endpoint as primary
+    this.apiBase = API_ENDPOINTS[1]; // http://localhost:9000/api/v1
+    console.log('🔧 JarService: Using API endpoint:', this.apiBase)
+    return this.apiBase;
   }
 
   /**
@@ -239,6 +223,60 @@ export class JarService {
     }
   }
   
+  /**
+   * Get comprehensive dependency analysis for a JAR
+   */
+  async getComprehensiveDependencyAnalysis(jarId: string): Promise<AnalysisData> {
+    console.log('🔍 JarService: Getting comprehensive dependency analysis for JAR:', jarId);
+    
+    // Find working endpoint first
+    await this.findWorkingEndpoint();
+    
+    const url = `${this.apiBase}/jars/${jarId}/analysis/comprehensive`;
+    console.log('📡 JarService: Making request to:', url);
+    
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      console.log('📥 JarService: Comprehensive analysis response:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ JarService: Comprehensive analysis request failed:', errorText);
+        throw new Error(`Failed to get comprehensive analysis: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('📋 JarService: Raw backend response:', result);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Analysis failed');
+      }
+      
+      // Transform backend response to frontend format
+      const transformedData = dataTransformationService.transformComprehensiveAnalysis(
+        result.data as BackendAnalysisResponse,
+        jarId
+      );
+      
+      console.log('✅ JarService: Comprehensive analysis transformed successfully:', {
+        totalDependencies: transformedData.summary.total_dependencies,
+        directDependencies: transformedData.summary.direct_dependencies,
+        transitiveDependencies: transformedData.summary.transitive_dependencies
+      });
+      
+      return transformedData;
+    } catch (error) {
+      console.error('❌ JarService: Comprehensive analysis error:', error);
+      throw error;
+    }
+  }
+
   /**
    * Transform backend JAR response to frontend format
    */

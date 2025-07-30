@@ -8,9 +8,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 import structlog
 
-from ...models.jar import DependencyScope
+from ...models.jar import DependencyScope, DependencyTree, DependencyNode
 from ...services.jar_service import jar_service
-from ...services.dependency_tree_service import dependency_tree_service
 from ...services.dependency_export_service import (
     dependency_export_service, ExportFormat, ExportOptions, ExportResult
 )
@@ -83,11 +82,11 @@ async def preview_dependency_export(
         
         jar_file = jar_service.active_jars[jar_id]
         
-        # Get dependency tree
-        tree = await dependency_tree_service.build_dependency_tree(
-            jar_id=jar_id,
-            jar_path=Path(jar_file.temp_path)
-        )
+        # Get comprehensive dependency analysis
+        comprehensive_data = await jar_service.analyze_comprehensive_dependencies(jar_id)
+        
+        # Transform to dependency tree format
+        tree = _transform_to_dependency_tree(comprehensive_data, jar_id)
         
         # Convert scope strings to enum values if provided
         filter_scope = None
@@ -109,11 +108,10 @@ async def preview_dependency_export(
         # Generate a small preview (limit to first few dependencies)
         preview_tree = tree
         if tree.total_dependencies > 10:
-            # Create a smaller tree for preview
-            preview_tree = dependency_tree_service.build_tree_from_flat_list(
-                jar_id=tree.jar_id,
-                dependencies=list(tree.all_dependencies.values())[:10]
-            )
+            # Create a smaller tree for preview by limiting dependencies
+            limited_deps = comprehensive_data.get('dependencies', [])[:10]
+            preview_data = {**comprehensive_data, 'dependencies': limited_deps}
+            preview_tree = _transform_to_dependency_tree(preview_data, jar_id)
         
         # Get export result for preview
         export_result = await dependency_export_service.export_dependency_tree(
@@ -178,11 +176,11 @@ async def export_dependencies(
         
         jar_file = jar_service.active_jars[jar_id]
         
-        # Get dependency tree
-        tree = await dependency_tree_service.build_dependency_tree(
-            jar_id=jar_id,
-            jar_path=Path(jar_file.temp_path)
-        )
+        # Get comprehensive dependency analysis
+        comprehensive_data = await jar_service.analyze_comprehensive_dependencies(jar_id)
+        
+        # Transform to dependency tree format
+        tree = _transform_to_dependency_tree(comprehensive_data, jar_id)
         
         # Convert scope strings to enum values if provided
         filter_scope = None
@@ -281,11 +279,11 @@ async def create_dependency_export(
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid scope: {str(e)}")
         
-        # Get dependency tree
-        tree = await dependency_tree_service.build_dependency_tree(
-            jar_id=jar_id,
-            jar_path=Path(jar_file.temp_path)
-        )
+        # Get comprehensive dependency analysis
+        comprehensive_data = await jar_service.analyze_comprehensive_dependencies(jar_id)
+        
+        # Transform to dependency tree format
+        tree = _transform_to_dependency_tree(comprehensive_data, jar_id)
         
         # Generate export
         try:
@@ -369,3 +367,131 @@ async def download_dependency_export(
         logger.error("Failed to download dependency export", 
                     jar_id=jar_id, filename=filename, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to download export: {str(e)}")
+
+
+def _transform_to_dependency_tree(comprehensive_data: Dict[str, Any], jar_id: str) -> DependencyTree:
+    """
+    Transform comprehensive dependency analysis data to DependencyTree format.
+    
+    Args:
+        comprehensive_data: Data from jar_service.analyze_comprehensive_dependencies()
+        jar_id: JAR identifier
+        
+    Returns:
+        DependencyTree object
+    """
+    # Create dependency tree
+    tree = DependencyTree(jar_id=jar_id)
+    
+    # Get dependencies from comprehensive data
+    dependencies = comprehensive_data.get('dependencies', [])
+    direct_dependencies = comprehensive_data.get('direct_dependencies', [])
+    transitive_dependencies = comprehensive_data.get('transitive_dependencies', [])
+    
+    # Transform dependencies to DependencyNode objects
+    all_dependencies = {}
+    root_dependencies = []
+    
+    # Process direct dependencies first
+    for dep_data in direct_dependencies:
+        node = _create_dependency_node(dep_data, is_transitive=False, depth=0)
+        all_dependencies[node.id] = node
+        root_dependencies.append(node)
+    
+    # Process transitive dependencies
+    for dep_data in transitive_dependencies:
+        node = _create_dependency_node(dep_data, is_transitive=True, depth=1)
+        all_dependencies[node.id] = node
+        
+        # Try to find a parent in direct dependencies
+        # This is a simplified approach - in reality we'd need more sophisticated parent-child mapping
+        if root_dependencies:
+            # For now, add transitive dependencies as children of the first direct dependency
+            parent = root_dependencies[0]
+            parent.children.append(node)
+            node.parent_id = parent.id
+            node.dependency_path = parent.dependency_path + [node.id]
+        else:
+            root_dependencies.append(node)
+    
+    # Set tree properties
+    tree.root_dependencies = root_dependencies
+    tree.all_dependencies = all_dependencies
+    tree.total_dependencies = len(all_dependencies)
+    tree.direct_dependencies = len(direct_dependencies)
+    tree.transitive_dependencies = len(transitive_dependencies)
+    tree.max_depth = max([dep.depth for dep in all_dependencies.values()], default=0)
+    
+    # Calculate scope and source counts
+    scope_counts = {}
+    source_counts = {}
+    for dep in all_dependencies.values():
+        scope_counts[dep.scope] = scope_counts.get(dep.scope, 0) + 1
+        source_counts[dep.source] = source_counts.get(dep.source, 0) + 1
+    
+    tree.scope_counts = scope_counts
+    tree.source_counts = source_counts
+    
+    return tree
+
+
+def _create_dependency_node(dep_data: Dict[str, Any], is_transitive: bool, depth: int) -> DependencyNode:
+    """
+    Create a DependencyNode from dependency data.
+    
+    Args:
+        dep_data: Dependency data from comprehensive analysis
+        is_transitive: Whether this is a transitive dependency
+        depth: Depth in the dependency tree
+        
+    Returns:
+        DependencyNode object
+    """
+    # Extract basic information
+    name = dep_data.get('name', '')
+    group_id = dep_data.get('group_id', '')
+    artifact_id = dep_data.get('artifact_id', '')
+    
+    # Handle cases where group_id or artifact_id might be None or empty
+    if not group_id or not artifact_id:
+        # Try to parse from name if it's in format "group:artifact"
+        if ':' in name:
+            parts = name.split(':')
+            if len(parts) >= 2:
+                group_id = group_id or parts[0]
+                artifact_id = artifact_id or parts[1]
+        else:
+            # Use name as both group and artifact if we can't parse
+            group_id = group_id or name or 'unknown'
+            artifact_id = artifact_id or name or 'unknown'
+    
+    # Ensure we have non-empty strings
+    group_id = group_id or 'unknown'
+    artifact_id = artifact_id or 'unknown'
+    
+    # Create unique ID
+    node_id = f"{group_id}:{artifact_id}"
+    
+    # Create the node
+    node = DependencyNode(
+        id=node_id,
+        group_id=group_id,
+        artifact_id=artifact_id,
+        version=dep_data.get('version'),
+        scope=dep_data.get('scope', 'compile'),
+        source=dep_data.get('source', 'detected'),
+        is_transitive=is_transitive,
+        depth=depth,
+        children=[],
+        dependency_path=[node_id],
+        has_conflicts=False,  # We'll need to implement conflict detection
+        conflict_ids=[],
+        description=dep_data.get('description'),
+        license=dep_data.get('license'),
+        confidence=dep_data.get('confidence', 1.0),
+        package_imports=dep_data.get('package_imports', []),
+        package_exports=dep_data.get('package_exports', []),
+        optional=dep_data.get('optional', False)
+    )
+    
+    return node

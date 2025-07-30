@@ -23,7 +23,7 @@ import sys
 class WorkflowTester:
     """Complete workflow integration tester."""
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "http://localhost:9000"):
         self.base_url = base_url
         self.session = requests.Session()
         self.session.timeout = 30
@@ -845,7 +845,7 @@ Implementation-Version: 1.0.0
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(description='Complete workflow integration tests')
-    parser.add_argument('--base-url', default='http://localhost:8000', 
+    parser.add_argument('--base-url', default='http://localhost:9000', 
                        help='Base URL for the backend API')
     parser.add_argument('--verbose', action='store_true', 
                        help='Enable verbose output')

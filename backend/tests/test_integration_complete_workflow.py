@@ -25,7 +25,7 @@ from src.services.dependency_export_service import dependency_export_service, Ex
 @pytest.fixture
 def client():
     """Create test client."""
-    return TestClient(app, base_url="http://localhost:8000")
+    return TestClient(app, base_url="http://localhost:9000")
 
 
 @pytest.fixture

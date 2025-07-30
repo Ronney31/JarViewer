@@ -17,7 +17,7 @@ from typing import Optional, List
 class TestRunner:
     """Integration test runner."""
     
-    def __init__(self, backend_url: str = "http://localhost:8000", frontend_url: str = "http://localhost:3000"):
+    def __init__(self, backend_url: str = "http://localhost:9000", frontend_url: str = "http://localhost:3000"):
         self.backend_url = backend_url
         self.frontend_url = frontend_url
         self.backend_process: Optional[subprocess.Popen] = None
@@ -69,7 +69,7 @@ class TestRunner:
             
             # Start the backend
             self.backend_process = subprocess.Popen(
-                [python_cmd, "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"],
+                [python_cmd, "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000"],
                 cwd=backend_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -364,7 +364,7 @@ class TestRunner:
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(description='Run complete workflow integration tests')
-    parser.add_argument('--backend-url', default='http://localhost:8000', 
+    parser.add_argument('--backend-url', default='http://localhost:9000', 
                        help='Backend service URL')
     parser.add_argument('--frontend-url', default='http://localhost:3000', 
                        help='Frontend service URL')

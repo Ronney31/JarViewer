@@ -270,26 +270,10 @@ async def advanced_search_files(
 
 @router.get("/{jar_id}/analysis/dependencies")
 async def analyze_dependencies(jar_id: str) -> JSONResponse:
-    """Perform comprehensive dependency and security analysis."""
+    """Perform comprehensive dependency analysis - redirects to comprehensive endpoint."""
     
-    try:
-        analysis_result = await jar_service.analyze_dependencies(jar_id)
-        
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "data": analysis_result
-            }
-        )
-        
-    except JarProcessingError as e:
-        logger.error("Dependency analysis failed", jar_id=jar_id, error=str(e))
-        raise HTTPException(status_code=404, detail=str(e))
-        
-    except Exception as e:
-        logger.error("Dependency analysis error", jar_id=jar_id, error=str(e))
-        raise HTTPException(status_code=500, detail="Dependency analysis failed")
+    # Redirect to the comprehensive analysis endpoint to avoid duplication
+    return await analyze_comprehensive_dependencies(jar_id)
 
 
 @router.get("/{jar_id}/analysis/comprehensive")

@@ -18,7 +18,7 @@ from src.services.dependency_tree_service import DependencyTreeService
 @pytest.fixture
 def client():
     """Create test client."""
-    return TestClient(app, base_url="http://localhost:8000")
+    return TestClient(app, base_url="http://localhost:9000")
 
 
 @pytest.fixture

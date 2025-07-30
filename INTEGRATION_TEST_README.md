@@ -102,7 +102,7 @@ npm run test -- --run tests/Integration.test.tsx
 - Python 3.8+
 - Virtual environment activated
 - Dependencies installed: `pip install -r requirements.txt`
-- Backend service running on http://localhost:8000
+- Backend service running on http://localhost:9000
 
 #### Frontend
 - Node.js 16+
@@ -157,7 +157,7 @@ For search performance testing:
 - UI components render and function properly
 
 ### Common Issues
-1. **Backend not starting**: Check port 8000 availability
+1. **Backend not starting**: Check port 9000 availability
 2. **Frontend not starting**: Check port 3000 availability, run `npm install`
 3. **Test timeouts**: Increase timeout values for slower systems
 4. **Memory errors**: Reduce test data size or increase system memory
@@ -176,13 +176,13 @@ python -m pytest backend/tests/test_integration_complete_workflow.py::TestComple
 ### Manual Testing
 ```bash
 # Test backend health
-curl http://localhost:8000/health
+curl http://localhost:9000/health
 
 # Test frontend availability
 curl http://localhost:3000
 
 # Run standalone integration test with custom URL
-python integration_test_complete_workflow.py --base-url http://localhost:8000
+python integration_test_complete_workflow.py --base-url http://localhost:9000
 ```
 
 ### Log Analysis

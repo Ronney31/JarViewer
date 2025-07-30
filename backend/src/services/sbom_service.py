@@ -13,7 +13,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 from .version_extraction_service import VersionInfo, ExtractedVersions
-from .dependency_service import Dependency, DependencyAnalysisResult
+from .enhanced_dependency_service import DependencyInfo, EnhancedDependencyReport
 
 logger = structlog.get_logger()
 
@@ -78,7 +78,7 @@ class SBOMGenerationService:
         self,
         jar_name: str,
         extracted_versions: ExtractedVersions,
-        dependency_analysis: DependencyAnalysisResult,
+        dependency_analysis: EnhancedDependencyReport,
         format: SBOMFormat = SBOMFormat.CYCLONE_DX
     ) -> GeneratedSBOM:
         """Generate SBOM in specified format."""
@@ -126,7 +126,7 @@ class SBOMGenerationService:
     async def _create_sbom_components(
         self,
         extracted_versions: ExtractedVersions,
-        dependency_analysis: DependencyAnalysisResult
+        dependency_analysis: EnhancedDependencyReport
     ) -> List[SBOMComponent]:
         """Create SBOM components from analysis results."""
         components = []
@@ -151,13 +151,13 @@ class SBOMGenerationService:
                 seen_components.add(component_key)
         
         # Add framework components
-        for framework in dependency_analysis.frameworks:
+        for framework_name, framework_version in dependency_analysis.detected_frameworks.items():
             component = SBOMComponent(
-                name=framework.name,
-                version=framework.version,
-                purl=self._create_purl(framework.name, framework.version),
+                name=framework_name,
+                version=framework_version,
+                purl=self._create_purl(framework_name, framework_version),
                 component_type="framework",
-                description=framework.description
+                description=f"{framework_name} framework"
             )
             
             component_key = (component.name, component.version)
@@ -187,7 +187,7 @@ class SBOMGenerationService:
             ]
         )
     
-    async def _dependency_to_component(self, dependency: Dependency) -> SBOMComponent:
+    async def _dependency_to_component(self, dependency: DependencyInfo) -> SBOMComponent:
         """Convert Dependency to SBOMComponent."""
         return SBOMComponent(
             name=dependency.name,

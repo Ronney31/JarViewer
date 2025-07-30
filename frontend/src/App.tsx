@@ -424,7 +424,7 @@ function App() {
 
         {/* Debug Panel (only in development) */}
         {process.env.NODE_ENV === 'development' && (
-          <div className="fixed bottom-4 left-4 z-50">
+          <div className="fixed bottom-4 left-4 z-50 opacity-60">
             <div className="bg-card border rounded-lg p-3 shadow-lg text-xs">
               <div className="font-medium mb-1">🚀 JarViewer Debug</div>
               <div className="space-y-1 text-muted-foreground">

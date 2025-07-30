@@ -3,7 +3,7 @@ class ApiService {
   private baseUrl: string;
 
   constructor() {
-    // Use environment variable for API URL, fallback to localhost:9000
+    // Use environment variable for API URL, fallback to localhost:9000 (correct backend port for Docker)
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:9000';
     this.baseUrl = `${apiUrl}/api/v1`;
   }
@@ -73,6 +73,20 @@ class ApiService {
         error: error instanceof Error ? error.message : 'Request failed',
       };
     }
+  }
+
+  /**
+   * Get comprehensive dependency analysis for a JAR
+   */
+  async getComprehensiveDependencyAnalysis(jarId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    return this.get(`/jars/${jarId}/analysis/comprehensive`);
+  }
+
+  /**
+   * Health check endpoint
+   */
+  async healthCheck(): Promise<{ success: boolean; data?: any; error?: string }> {
+    return this.get('/health');
   }
 }
 

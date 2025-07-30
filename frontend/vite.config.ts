@@ -22,7 +22,7 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://backend:8000',
+        target: 'http://backend:9000',
         changeOrigin: true,
         secure: false,
         timeout: 120000, // 2 minutes for large file uploads
@@ -39,7 +39,7 @@ export default defineConfig({
             // Ensure proper headers for file uploads
             if (req.url?.includes('/upload')) {
               console.log('🔧 File upload request detected')
-              proxyReq.setHeader('Host', 'backend:8000')
+              proxyReq.setHeader('Host', 'backend:9000')
             }
           })
           proxy.on('proxyRes', (proxyRes, req, res) => {
@@ -51,7 +51,7 @@ export default defineConfig({
         },
       },
       '/health': {
-        target: 'http://backend:8000',
+        target: 'http://backend:9000',
         changeOrigin: true,
         secure: false,
         timeout: 30000,

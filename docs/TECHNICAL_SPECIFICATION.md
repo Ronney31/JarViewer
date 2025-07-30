@@ -692,8 +692,8 @@ WORKDIR /app
 COPY --from=backend-builder /app/backend ./backend
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY backend/lib/cfr-0.152.jar ./backend/lib/
-EXPOSE 8000
-CMD ["uvicorn", "backend.src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 9000
+CMD ["uvicorn", "backend.src.main:app", "--host", "0.0.0.0", "--port", "9000"]
 ```
 
 #### 7.1.2 Docker Compose Configuration
@@ -703,7 +703,7 @@ services:
   jarviewer-app:
     build: .
     ports:
-      - "8000:8000"
+      - "9000:9000"
     environment:
       - ENVIRONMENT=production
       - REDIS_URL=redis://redis:6379
@@ -759,7 +759,7 @@ spec:
       - name: jarviewer
         image: jarviewer:2.0.0
         ports:
-        - containerPort: 8000
+        - containerPort: 9000
         env:
         - name: ENVIRONMENT
           value: "production"
@@ -775,13 +775,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: 8000
+            port: 9000
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 8000
+            port: 9000
           initialDelaySeconds: 5
           periodSeconds: 5
 ```

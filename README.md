@@ -20,8 +20,8 @@ docker-compose -f docker-compose.test.yml up -d
 
 # Access the application
 # Frontend: http://localhost:3000
-# Backend:  http://localhost:8000
-# Health:   http://localhost:8000/health
+# Backend:  http://localhost:9000
+# Health:   http://localhost:9000/health
 ```
 
 ### Stopping the Application
@@ -54,11 +54,11 @@ poetry install
 poetry shell
 
 # Start the backend server
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.main:app --host 0.0.0.0 --port 9000 --reload
 
-# Backend will be available at: http://localhost:8000
-# API docs: http://localhost:8000/docs
-# Health check: http://localhost:8000/health
+# Backend will be available at: http://localhost:9000
+# API docs: http://localhost:9000/docs
+# Health check: http://localhost:9000/health
 ```
 
 ### Frontend Setup
@@ -96,7 +96,7 @@ TEMP_DIR=/tmp/jarviewer
 
 **Frontend (.env in frontend/ directory):**
 ```bash
-VITE_API_URL=http://localhost:8000
+VITE_API_URL=http://localhost:9000
 VITE_ENVIRONMENT=development
 ```
 
@@ -105,7 +105,7 @@ VITE_ENVIRONMENT=development
 1. **Start Backend**: Run `uvicorn src.main:app --reload` in backend directory
 2. **Start Frontend**: Run `pnpm dev` in frontend directory
 3. **Access Application**: Open http://localhost:3000
-4. **API Documentation**: Visit http://localhost:8000/docs for interactive API docs
+4. **API Documentation**: Visit http://localhost:9000/docs for interactive API docs
 
 ### Testing
 

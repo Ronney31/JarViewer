@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { apiService } from '@/services/apiService';
+import { jarService } from '@/services/jarService';
 import { 
   AnalysisError, 
   LoadingState, 
@@ -31,6 +31,10 @@ interface DependencyNode {
   license?: string;
   size_bytes?: number;
   file_path?: string;
+  confidence?: number;
+  package_imports?: string[];
+  package_exports?: string[];
+  optional?: boolean;
 }
 
 interface DependencyConflict {
@@ -75,6 +79,9 @@ interface AnalysisData {
   };
   conflicts: DependencyConflict[];
   recommendations: string[];
+  detectedFrameworks: Record<string, string>;
+  importedPackages: Record<string, string[]>;
+  exportedPackages: Record<string, string>;
 }
 
 interface SearchFilters {
@@ -174,18 +181,12 @@ export const useSingleJarDashboardStore = create<SingleJarDashboardState>()(
           errorHandlingService.updateLoadingState(jarId, currentStage, 20, startTime);
           set({ loadingState: errorHandlingService.getLoadingState(jarId) });
 
-          const response = await apiService.get(`/jars/${jarId}/analysis/comprehensive`);
-          
-          if (!response.success) {
-            throw new Error(response.error || 'Failed to load analysis');
-          }
-
           // Stage 2: Building tree
           currentStage = LoadingStage.BUILDING_TREE;
           errorHandlingService.updateLoadingState(jarId, currentStage, 50, startTime);
           set({ loadingState: errorHandlingService.getLoadingState(jarId) });
 
-          const analysisData: AnalysisData = response.data;
+          const analysisData: AnalysisData = await jarService.getComprehensiveDependencyAnalysis(jarId);
           
           // Check for partial failures
           const errors: AnalysisError[] = [];
@@ -453,16 +454,31 @@ function searchDependenciesSync(
 ): DependencyNode[] {
   let results = dependencies;
   
-  // Apply text search
+  // Apply enhanced text search
   if (query.trim()) {
     const queryLower = query.toLowerCase();
-    results = results.filter(dep => 
-      dep.group_id.toLowerCase().includes(queryLower) ||
-      dep.artifact_id.toLowerCase().includes(queryLower) ||
-      (dep.version && dep.version.toLowerCase().includes(queryLower)) ||
-      (dep.description && dep.description.toLowerCase().includes(queryLower)) ||
-      `${dep.group_id}:${dep.artifact_id}`.toLowerCase().includes(queryLower)
-    );
+    results = results.filter(dep => {
+      // Search in basic fields
+      const basicMatch = 
+        dep.group_id.toLowerCase().includes(queryLower) ||
+        dep.artifact_id.toLowerCase().includes(queryLower) ||
+        (dep.version && dep.version.toLowerCase().includes(queryLower)) ||
+        (dep.description && dep.description.toLowerCase().includes(queryLower)) ||
+        `${dep.group_id}:${dep.artifact_id}`.toLowerCase().includes(queryLower);
+      
+      // Search in package imports/exports
+      const packageMatch = 
+        (dep.package_imports && dep.package_imports.some(pkg => pkg.toLowerCase().includes(queryLower))) ||
+        (dep.package_exports && dep.package_exports.some(pkg => pkg.toLowerCase().includes(queryLower)));
+      
+      // Search in license information
+      const licenseMatch = dep.license && dep.license.toLowerCase().includes(queryLower);
+      
+      // Search in file path
+      const pathMatch = dep.file_path && dep.file_path.toLowerCase().includes(queryLower);
+      
+      return basicMatch || packageMatch || licenseMatch || pathMatch;
+    });
   }
   
   // Apply filters

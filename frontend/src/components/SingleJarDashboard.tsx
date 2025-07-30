@@ -342,7 +342,7 @@ const SingleJarDashboard: React.FC<SingleJarDashboardProps> = ({
         </div>
 
         {/* Tab Content */}
-        <div className="p-6">
+        <div className="p-6 max-h-[calc(100vh-16rem)] overflow-y-auto">
           <AnimatePresence mode="wait">
             {activeSection === 'overview' && (
               <motion.div

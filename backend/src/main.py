@@ -289,7 +289,7 @@ async def custom_swagger_ui_html():
             <div class="status">
                 <strong>✅ API Status:</strong> All endpoints are operational<br>
                 <strong>📊 Version:</strong> 1.0.0<br>
-                <strong>🔗 Base URL:</strong> http://localhost:8000
+                <strong>🔗 Base URL:</strong> http://localhost:9000
             </div>
             
             <h2>📋 Available Endpoints</h2>
@@ -519,7 +519,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "src.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=9000,
         reload=settings.ENVIRONMENT == "development",
         log_config=None,  # Use our custom logging
     )

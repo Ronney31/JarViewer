@@ -17,11 +17,9 @@ from ..models.jar import (
     ProcessingProgress, FileContent, SearchResult, DecompilationResult
 )
 from ..core.config import get_settings
+from .enhanced_dependency_service import enhanced_dependency_service, EnhancedDependencyReport
 from .version_extraction_service import version_extraction_service, ExtractedVersions
 from .sbom_service import sbom_service, SBOMFormat, GeneratedSBOM
-from .conflict_detection_service import conflict_detection_service, ConflictAnalysisResult
-from .comprehensive_dependency_service import comprehensive_dependency_service, ComprehensiveDependencyReport
-from .dependency_tree_service import dependency_tree_service
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -597,73 +595,121 @@ class JarService:
         jar_file = self.active_jars[jar_id]
         
         try:
-            # Import here to avoid circular imports
-            from .dependency_service import dependency_analysis_service
-            
-            # Perform dependency analysis
-            analysis_result = await dependency_analysis_service.analyze_jar(
-                jar_temp_path=Path(jar_file.temp_path),
-                file_structure=jar_file.structure
+            # Perform enhanced dependency analysis
+            analysis_result = await enhanced_dependency_service.analyze_jar_dependencies(
+                jar_path=Path(jar_file.temp_path)
             )
             
             # Convert to serializable format
             serialized_result = {
+                "jar_info": {
+                    "name": analysis_result.jar_info.name,
+                    "version": analysis_result.jar_info.version,
+                    "group_id": analysis_result.jar_info.group_id,
+                    "artifact_id": analysis_result.jar_info.artifact_id,
+                    "bundle_name": analysis_result.jar_info.bundle_name,
+                    "bundle_symbolic_name": analysis_result.jar_info.bundle_symbolic_name,
+                    "bundle_version": analysis_result.jar_info.bundle_version,
+                    "bundle_vendor": analysis_result.jar_info.bundle_vendor,
+                    "bundle_description": analysis_result.jar_info.bundle_description,
+                    "built_by": analysis_result.jar_info.built_by,
+                    "build_jdk": analysis_result.jar_info.build_jdk,
+                    "build_time": analysis_result.jar_info.build_time,
+                    "created_by": analysis_result.jar_info.created_by,
+                    "specification_title": analysis_result.jar_info.specification_title,
+                    "specification_version": analysis_result.jar_info.specification_version,
+                    "specification_vendor": analysis_result.jar_info.specification_vendor,
+                    "implementation_title": analysis_result.jar_info.implementation_title,
+                    "implementation_version": analysis_result.jar_info.implementation_version,
+                    "implementation_vendor": analysis_result.jar_info.implementation_vendor,
+                    "main_class": analysis_result.jar_info.main_class,
+                    "class_path": analysis_result.jar_info.class_path
+                },
                 "dependencies": [
                     {
                         "name": dep.name,
                         "version": dep.version,
                         "group_id": dep.group_id,
                         "artifact_id": dep.artifact_id,
-                        "dependency_type": dep.dependency_type.value,
+                        "scope": dep.scope,
+                        "source": dep.source,
                         "source_file": dep.source_file,
-                        "description": dep.description
+                        "optional": dep.optional,
+                        "description": dep.description,
+                        "license": dep.license,
+                        "bundle_symbolic_name": dep.bundle_symbolic_name,
+                        "bundle_version": dep.bundle_version,
+                        "resolution": dep.resolution,
+                        "package_imports": dep.package_imports,
+                        "package_exports": dep.package_exports,
+                        "confidence": dep.confidence
                     }
                     for dep in analysis_result.dependencies
                 ],
-                "frameworks": [
+                "direct_dependencies": [
                     {
-                        "name": fw.name,
-                        "version": fw.version,
-                        "confidence": fw.confidence,
-                        "indicators": fw.indicators,
-                        "description": fw.description
+                        "name": dep.name,
+                        "version": dep.version,
+                        "group_id": dep.group_id,
+                        "artifact_id": dep.artifact_id,
+                        "scope": dep.scope,
+                        "source": dep.source,
+                        "description": dep.description,
+                        "confidence": dep.confidence
                     }
-                    for fw in analysis_result.frameworks
+                    for dep in analysis_result.direct_dependencies
                 ],
-                "security_issues": [
+                "transitive_dependencies": [
                     {
-                        "title": issue.title,
-                        "description": issue.description,
-                        "severity": issue.severity.value,
-                        "file_path": issue.file_path,
-                        "recommendation": issue.recommendation,
-                        "cve_id": issue.cve_id
+                        "name": dep.name,
+                        "version": dep.version,
+                        "group_id": dep.group_id,
+                        "artifact_id": dep.artifact_id,
+                        "source": dep.source,
+                        "description": dep.description,
+                        "confidence": dep.confidence
                     }
-                    for issue in analysis_result.security_issues
+                    for dep in analysis_result.transitive_dependencies
                 ],
-                "package_structure": analysis_result.package_structure,
-                "entry_points": analysis_result.entry_points,
-                "build_info": analysis_result.build_info,
-                "summary": {
-                    "total_dependencies": len(analysis_result.dependencies),
-                    "total_frameworks": len(analysis_result.frameworks),
-                    "security_issues_count": len(analysis_result.security_issues),
-                    "critical_issues": len([
-                        issue for issue in analysis_result.security_issues 
-                        if issue.severity.value == "critical"
-                    ]),
-                    "high_issues": len([
-                        issue for issue in analysis_result.security_issues 
-                        if issue.severity.value == "high"
-                    ])
+                "optional_dependencies": [
+                    {
+                        "name": dep.name,
+                        "version": dep.version,
+                        "group_id": dep.group_id,
+                        "artifact_id": dep.artifact_id,
+                        "source": dep.source,
+                        "description": dep.description,
+                        "confidence": dep.confidence
+                    }
+                    for dep in analysis_result.optional_dependencies
+                ],
+                "imported_packages": analysis_result.imported_packages,
+                "exported_packages": analysis_result.exported_packages,
+                "detected_frameworks": analysis_result.detected_frameworks,
+                "security_risks": analysis_result.security_risks,
+                "license_conflicts": analysis_result.license_conflicts,
+                "version_conflicts": analysis_result.version_conflicts,
+                "statistics": {
+                    "total_dependencies": analysis_result.total_dependencies,
+                    "maven_dependencies": analysis_result.maven_dependencies,
+                    "osgi_dependencies": analysis_result.osgi_dependencies,
+                    "gradle_dependencies": analysis_result.gradle_dependencies,
+                    "direct_dependencies": len(analysis_result.direct_dependencies),
+                    "transitive_dependencies": len(analysis_result.transitive_dependencies),
+                    "optional_dependencies": len(analysis_result.optional_dependencies),
+                    "security_risks": len(analysis_result.security_risks),
+                    "license_conflicts": len(analysis_result.license_conflicts),
+                    "version_conflicts": len(analysis_result.version_conflicts),
+                    "detected_frameworks": len(analysis_result.detected_frameworks)
                 }
             }
             
-            logger.info("Dependency analysis completed", 
+            logger.info("Enhanced dependency analysis completed", 
                        jar_id=jar_id,
-                       dependencies=len(analysis_result.dependencies),
-                       frameworks=len(analysis_result.frameworks),
-                       security_issues=len(analysis_result.security_issues))
+                       total_dependencies=analysis_result.total_dependencies,
+                       direct_dependencies=len(analysis_result.direct_dependencies),
+                       frameworks=len(analysis_result.detected_frameworks),
+                       security_risks=len(analysis_result.security_risks))
             
             return serialized_result
             
@@ -673,111 +719,6 @@ class JarService:
                         error=str(e))
             raise JarProcessingError(f"Dependency analysis failed: {str(e)}")
     
-    async def build_dependency_tree(self, jar_id: str) -> Dict[str, Any]:
-        """Build hierarchical dependency tree for the JAR."""
-        if jar_id not in self.active_jars:
-            raise JarProcessingError("JAR not found")
-        
-        jar_file = self.active_jars[jar_id]
-        
-        try:
-            logger.info("Building dependency tree", jar_id=jar_id)
-            
-            # Build dependency tree
-            dependency_tree = await dependency_tree_service.build_dependency_tree(
-                jar_id=jar_id,
-                jar_path=Path(jar_file.temp_path)
-            )
-            
-            # Create analysis report
-            analysis_report = dependency_tree_service.create_analysis_report(dependency_tree)
-            
-            # Convert to serializable format
-            serialized_result = {
-                "tree": {
-                    "id": dependency_tree.id,
-                    "jar_id": dependency_tree.jar_id,
-                    "total_dependencies": dependency_tree.total_dependencies,
-                    "direct_dependencies": dependency_tree.direct_dependencies,
-                    "transitive_dependencies": dependency_tree.transitive_dependencies,
-                    "max_depth": dependency_tree.max_depth,
-                    "scope_counts": {scope.value: count for scope, count in dependency_tree.scope_counts.items()},
-                    "source_counts": {source.value: count for source, count in dependency_tree.source_counts.items()},
-                    "root_dependencies": [
-                        self._serialize_dependency_node(dep) for dep in dependency_tree.root_dependencies
-                    ],
-                    "conflicts": [
-                        {
-                            "id": conflict.id,
-                            "conflict_type": conflict.conflict_type.value,
-                            "affected_dependencies": conflict.affected_dependencies,
-                            "description": conflict.description,
-                            "severity": conflict.severity,
-                            "resolution_suggestion": conflict.resolution_suggestion,
-                            "conflicting_versions": conflict.conflicting_versions,
-                            "winning_version": conflict.winning_version,
-                            "paths": conflict.paths
-                        }
-                        for conflict in dependency_tree.conflicts
-                    ],
-                    "paths": [
-                        {
-                            "target_dependency_id": path.target_dependency_id,
-                            "path": path.path,
-                            "depth": path.depth,
-                            "path_string": path.path_string
-                        }
-                        for path in dependency_tree.paths
-                    ]
-                },
-                "analysis": {
-                    "id": analysis_report.id,
-                    "created_at": analysis_report.created_at.isoformat(),
-                    "summary": analysis_report.summary,
-                    "security_risks": analysis_report.security_risks,
-                    "license_risks": analysis_report.license_risks,
-                    "outdated_dependencies": analysis_report.outdated_dependencies,
-                    "recommendations": analysis_report.recommendations
-                }
-            }
-            
-            logger.info("Dependency tree built successfully", 
-                       jar_id=jar_id,
-                       total_deps=dependency_tree.total_dependencies,
-                       conflicts=len(dependency_tree.conflicts))
-            
-            return serialized_result
-            
-        except Exception as e:
-            logger.error("Dependency tree building failed", 
-                        jar_id=jar_id, 
-                        error=str(e))
-            raise JarProcessingError(f"Dependency tree building failed: {str(e)}")
-    
-    def _serialize_dependency_node(self, node) -> Dict[str, Any]:
-        """Serialize a dependency node to dictionary format."""
-        return {
-            "id": node.id,
-            "group_id": node.group_id,
-            "artifact_id": node.artifact_id,
-            "version": node.version,
-            "scope": node.scope.value,
-            "source": node.source.value,
-            "optional": node.optional,
-            "parent_id": node.parent_id,
-            "description": node.description,
-            "license": node.license,
-            "size_bytes": node.size_bytes,
-            "file_path": node.file_path,
-            "is_transitive": node.is_transitive,
-            "depth": node.depth,
-            "resolved_version": node.resolved_version,
-            "coordinate": node.coordinate,
-            "name": node.name,
-            "children": [
-                self._serialize_dependency_node(child) for child in node.children
-            ]
-        }
 
     async def extract_all_versions(self, jar_id: str) -> ExtractedVersions:
         """Extract comprehensive version information from JAR."""
@@ -805,37 +746,7 @@ class JarService:
                         error=str(e))
             raise JarProcessingError(f"Version extraction failed: {str(e)}")
 
-    async def analyze_dependency_conflicts(self, jar_id: str) -> ConflictAnalysisResult:
-        """Analyze dependency conflicts and provide resolution recommendations."""
-        if jar_id not in self.active_jars:
-            raise JarProcessingError(f"JAR {jar_id} not found")
-        
-        logger.info("Starting dependency conflict analysis", jar_id=jar_id)
-        
-        try:
-            # Get comprehensive version information
-            extracted_versions = await self.extract_all_versions(jar_id)
-            
-            # Get dependency analysis
-            dependency_analysis = await self._get_dependency_analysis_result(jar_id)
-            
-            # Perform conflict analysis
-            conflict_result = await conflict_detection_service.analyze_conflicts(
-                extracted_versions, dependency_analysis
-            )
-            
-            logger.info("Conflict analysis completed", 
-                       jar_id=jar_id,
-                       total_conflicts=len(conflict_result.conflicts),
-                       conflicted_dependencies=conflict_result.conflicted_dependencies)
-            
-            return conflict_result
-            
-        except Exception as e:
-            logger.error("Conflict analysis failed", 
-                        jar_id=jar_id, 
-                        error=str(e))
-            raise JarProcessingError(f"Conflict analysis failed: {str(e)}")
+
 
     async def generate_sbom(self, jar_id: str, format: str = "cyclonedx") -> GeneratedSBOM:
         """Generate Software Bill of Materials (SBOM) for the JAR."""
@@ -937,91 +848,118 @@ class JarService:
         logger.info("Starting comprehensive dependency analysis", jar_id=jar_id)
         
         try:
-            # Get comprehensive analysis
-            report = await comprehensive_dependency_service.analyze_comprehensive_dependencies(
-                temp_path, jar_file.size
+            # Use enhanced dependency service for comprehensive analysis
+            report = await enhanced_dependency_service.analyze_jar_dependencies(
+                jar_path=temp_path
             )
             
-            # Convert to serializable format
+            # Convert to serializable format matching enhanced service
             result = {
-                "maven_dependencies": [
+                "jar_info": {
+                    "name": report.jar_info.name,
+                    "version": report.jar_info.version,
+                    "group_id": report.jar_info.group_id,
+                    "artifact_id": report.jar_info.artifact_id,
+                    "bundle_name": report.jar_info.bundle_name,
+                    "bundle_symbolic_name": report.jar_info.bundle_symbolic_name,
+                    "bundle_version": report.jar_info.bundle_version,
+                    "bundle_vendor": report.jar_info.bundle_vendor,
+                    "bundle_description": report.jar_info.bundle_description,
+                    "built_by": report.jar_info.built_by,
+                    "build_jdk": report.jar_info.build_jdk,
+                    "build_time": report.jar_info.build_time,
+                    "created_by": report.jar_info.created_by,
+                    "specification_title": report.jar_info.specification_title,
+                    "specification_version": report.jar_info.specification_version,
+                    "specification_vendor": report.jar_info.specification_vendor,
+                    "implementation_title": report.jar_info.implementation_title,
+                    "implementation_version": report.jar_info.implementation_version,
+                    "implementation_vendor": report.jar_info.implementation_vendor,
+                    "main_class": report.jar_info.main_class,
+                    "class_path": report.jar_info.class_path
+                },
+                "dependencies": [
                     {
                         "name": dep.name,
                         "version": dep.version,
                         "group_id": dep.group_id,
                         "artifact_id": dep.artifact_id,
-                        "type": dep.type,
+                        "scope": dep.scope,
                         "source": dep.source,
+                        "optional": dep.optional,
                         "description": dep.description,
                         "license": dep.license,
-                        "class_count": dep.class_count
+                        "bundle_symbolic_name": dep.bundle_symbolic_name,
+                        "bundle_version": dep.bundle_version,
+                        "resolution": dep.resolution,
+                        "package_imports": dep.package_imports,
+                        "package_exports": dep.package_exports,
+                        "confidence": dep.confidence
                     }
-                    for dep in report.maven_dependencies
+                    for dep in report.dependencies
                 ],
-                "gradle_dependencies": [
+                "direct_dependencies": [
                     {
                         "name": dep.name,
                         "version": dep.version,
                         "group_id": dep.group_id,
                         "artifact_id": dep.artifact_id,
-                        "type": dep.type,
+                        "scope": dep.scope,
                         "source": dep.source,
                         "description": dep.description,
-                        "license": dep.license,
-                        "class_count": dep.class_count
+                        "confidence": dep.confidence
                     }
-                    for dep in report.gradle_dependencies
+                    for dep in report.direct_dependencies
                 ],
-                "detected_libraries": [
+                "transitive_dependencies": [
                     {
                         "name": dep.name,
                         "version": dep.version,
                         "group_id": dep.group_id,
                         "artifact_id": dep.artifact_id,
-                        "type": dep.type,
                         "source": dep.source,
                         "description": dep.description,
-                        "license": dep.license,
-                        "class_count": dep.class_count
+                        "confidence": dep.confidence
                     }
-                    for dep in report.detected_libraries
+                    for dep in report.transitive_dependencies
                 ],
-                "frameworks": [
+                "optional_dependencies": [
                     {
-                        "name": fw.name,
-                        "version": fw.version,
-                        "confidence": fw.confidence,
-                        "components": fw.components,
-                        "description": fw.description
+                        "name": dep.name,
+                        "version": dep.version,
+                        "group_id": dep.group_id,
+                        "artifact_id": dep.artifact_id,
+                        "source": dep.source,
+                        "description": dep.description,
+                        "confidence": dep.confidence
                     }
-                    for fw in report.frameworks
+                    for dep in report.optional_dependencies
                 ],
-                "java_version": report.java_version,
-                "build_tool": report.build_tool,
-                "top_packages": report.top_packages,
-                "external_packages": report.external_packages,
+                "imported_packages": report.imported_packages,
+                "exported_packages": report.exported_packages,
+                "detected_frameworks": report.detected_frameworks,
+                "security_risks": report.security_risks,
+                "license_conflicts": report.license_conflicts,
+                "version_conflicts": report.version_conflicts,
                 "statistics": {
                     "total_dependencies": report.total_dependencies,
-                    "total_classes": report.total_classes,
-                    "total_packages": report.total_packages,
-                    "jar_size_mb": report.jar_size_mb
-                },
-                "risk_assessment": {
-                    "outdated_dependencies": report.outdated_dependencies,
-                    "security_concerns": report.security_concerns,
-                    "license_info": report.license_info
-                },
-                "summary": {
-                    "decision_factors": self._generate_decision_factors(report),
-                    "compatibility_score": self._calculate_compatibility_score(report),
-                    "recommendation": self._generate_recommendation(report)
+                    "maven_dependencies": report.maven_dependencies,
+                    "osgi_dependencies": report.osgi_dependencies,
+                    "gradle_dependencies": report.gradle_dependencies,
+                    "direct_dependencies": len(report.direct_dependencies),
+                    "transitive_dependencies": len(report.transitive_dependencies),
+                    "optional_dependencies": len(report.optional_dependencies),
+                    "security_risks": len(report.security_risks),
+                    "license_conflicts": len(report.license_conflicts),
+                    "version_conflicts": len(report.version_conflicts),
+                    "detected_frameworks": len(report.detected_frameworks)
                 }
             }
             
             logger.info("Comprehensive dependency analysis completed", 
                        jar_id=jar_id,
                        total_dependencies=report.total_dependencies,
-                       frameworks=len(report.frameworks))
+                       frameworks=len(report.detected_frameworks))
             
             return result
             
@@ -1031,68 +969,72 @@ class JarService:
                         error=str(e))
             raise JarProcessingError(f"Comprehensive dependency analysis failed: {str(e)}")
 
-    def _generate_decision_factors(self, report: ComprehensiveDependencyReport) -> List[str]:
+    def _generate_decision_factors(self, report: EnhancedDependencyReport) -> List[str]:
         """Generate decision factors for using this JAR."""
         factors = []
         
         # Positive factors
-        if report.frameworks:
-            factors.append(f"✅ Uses established frameworks: {', '.join([fw.name for fw in report.frameworks[:3]])}")
+        if report.detected_frameworks:
+            framework_names = list(report.detected_frameworks.keys())[:3]
+            factors.append(f"✅ Uses established frameworks: {', '.join(framework_names)}")
         
-        if report.build_tool:
-            factors.append(f"✅ Built with {report.build_tool} (standard build tool)")
-        
-        if report.java_version:
-            factors.append(f"✅ Built with Java {report.java_version}")
+        if report.jar_info.build_jdk:
+            factors.append(f"✅ Built with Java {report.jar_info.build_jdk}")
         
         if report.total_dependencies < 20:
             factors.append("✅ Lightweight - few external dependencies")
         
         # Warning factors
-        if report.outdated_dependencies:
-            factors.append(f"⚠️ Contains {len(report.outdated_dependencies)} potentially outdated dependencies")
+        if report.security_risks:
+            factors.append(f"⚠️ {len(report.security_risks)} potential security concerns")
         
-        if report.security_concerns:
-            factors.append(f"⚠️ {len(report.security_concerns)} potential security concerns")
+        if report.license_conflicts:
+            factors.append(f"⚠️ {len(report.license_conflicts)} license conflicts detected")
+        
+        if report.version_conflicts:
+            factors.append(f"⚠️ {len(report.version_conflicts)} version conflicts detected")
         
         if report.total_dependencies > 50:
             factors.append("⚠️ Heavy - many external dependencies")
         
-        if report.jar_size_mb > 50:
-            factors.append(f"⚠️ Large JAR size ({report.jar_size_mb} MB)")
-        
         return factors
 
-    def _calculate_compatibility_score(self, report: ComprehensiveDependencyReport) -> int:
+    def _calculate_compatibility_score(self, report: EnhancedDependencyReport) -> int:
         """Calculate compatibility score (0-100)."""
         score = 70  # Base score
         
         # Positive factors
-        if report.build_tool in ['Maven', 'Gradle']:
-            score += 10
+        if report.maven_dependencies > 0 or report.gradle_dependencies > 0:
+            score += 10  # Uses standard build tools
         
-        if report.frameworks:
-            score += 5
+        if report.detected_frameworks:
+            score += 5  # Uses established frameworks
         
-        if len(report.outdated_dependencies) == 0:
-            score += 10
+        if len(report.security_risks) == 0:
+            score += 10  # No security risks
         
-        if len(report.security_concerns) == 0:
-            score += 10
+        if len(report.license_conflicts) == 0:
+            score += 5  # No license conflicts
+        
+        if len(report.version_conflicts) == 0:
+            score += 5  # No version conflicts
         
         # Negative factors
-        if len(report.outdated_dependencies) > 5:
-            score -= 15
+        if len(report.security_risks) > 0:
+            score -= 20  # Security risks present
         
-        if len(report.security_concerns) > 0:
-            score -= 20
+        if len(report.license_conflicts) > 0:
+            score -= 10  # License conflicts
+        
+        if len(report.version_conflicts) > 0:
+            score -= 10  # Version conflicts
         
         if report.total_dependencies > 100:
-            score -= 10
+            score -= 10  # Too many dependencies
         
         return max(0, min(100, score))
 
-    def _generate_recommendation(self, report: ComprehensiveDependencyReport) -> str:
+    def _generate_recommendation(self, report: EnhancedDependencyReport) -> str:
         """Generate usage recommendation."""
         score = self._calculate_compatibility_score(report)
         
@@ -1116,11 +1058,10 @@ class JarService:
             # Run all analyses in parallel for better performance
             import asyncio
             
-            # Gather all analysis results
+            # Gather all analysis results using enhanced service
             results = await asyncio.gather(
                 self.analyze_comprehensive_dependencies(jar_id),
                 self.extract_all_versions(jar_id),
-                self.analyze_dependency_conflicts(jar_id),
                 self.analyze_dependencies(jar_id),
                 self.generate_sbom(jar_id, "cyclonedx"),
                 return_exceptions=True
@@ -1129,9 +1070,8 @@ class JarService:
             # Extract results and handle any exceptions
             comprehensive_deps = results[0] if not isinstance(results[0], Exception) else None
             version_analysis = results[1] if not isinstance(results[1], Exception) else None
-            conflict_analysis = results[2] if not isinstance(results[2], Exception) else None
-            dependency_analysis = results[3] if not isinstance(results[3], Exception) else None
-            sbom_result = results[4] if not isinstance(results[4], Exception) else None
+            dependency_analysis = results[2] if not isinstance(results[2], Exception) else None
+            sbom_result = results[3] if not isinstance(results[3], Exception) else None
             
             # Build complete analysis response
             complete_analysis = {
@@ -1144,17 +1084,16 @@ class JarService:
                 },
                 "comprehensive_dependencies": comprehensive_deps,
                 "version_analysis": self._serialize_version_analysis(version_analysis) if version_analysis else None,
-                "conflict_analysis": self._serialize_conflict_analysis(conflict_analysis) if conflict_analysis else None,
                 "dependency_analysis": dependency_analysis,
                 "sbom": self._serialize_sbom_result(sbom_result) if sbom_result else None,
                 "analysis_summary": self._generate_analysis_summary(
-                    comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis
+                    comprehensive_deps, version_analysis, dependency_analysis
                 ),
                 "recommendations": self._generate_complete_recommendations(
-                    comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis
+                    comprehensive_deps, version_analysis, dependency_analysis
                 ),
                 "risk_assessment": self._generate_risk_assessment(
-                    comprehensive_deps, version_analysis, conflict_analysis, dependency_analysis
+                    comprehensive_deps, version_analysis, dependency_analysis
                 )
             }
             
@@ -1375,19 +1314,6 @@ class JarService:
         else:
             return "✅ MINIMAL RISK - No significant issues detected. Safe for production use."
 
-    async def _get_dependency_analysis_result(self, jar_id: str):
-        """Get dependency analysis result for internal use."""
-        from .dependency_service import dependency_analysis_service
-        
-        jar_file = self.active_jars[jar_id]
-        temp_path = Path(jar_file.temp_path)
-        
-        # Get dependency analysis
-        analysis_result = await dependency_analysis_service.analyze_jar(
-            temp_path, jar_file.structure
-        )
-        
-        return analysis_result
 
     def cleanup_jar(self, jar_id: str) -> None:
         if jar_id in self.active_jars:

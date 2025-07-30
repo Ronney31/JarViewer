@@ -21,10 +21,14 @@ class DependencyScope(str, Enum):
 
 class DependencySource(str, Enum):
     """Source of dependency detection."""
-    MAVEN_POM = "maven_pom"
-    GRADLE_BUILD = "gradle_build"
+    MAVEN = "maven"
+    GRADLE = "gradle"
+    GRADLE_PROPERTIES = "gradle_properties"
+    SBT = "sbt"
+    OSGI = "osgi"
     MANIFEST = "manifest"
     IMPORTS = "imports"
+    FRAMEWORK_DETECTION = "framework_detection"
     CLASSPATH = "classpath"
     DETECTED = "detected"
 
@@ -70,6 +74,9 @@ class DependencyNode(BaseModel):
     is_transitive: bool = False
     depth: int = 0
     resolved_version: Optional[str] = None
+    confidence: float = 1.0  # Confidence score for dependency detection (0.0-1.0)
+    package_imports: List[str] = Field(default_factory=list)  # Imported packages
+    package_exports: List[str] = Field(default_factory=list)  # Exported packages
     
     # Conflict status indicators
     has_conflicts: bool = False

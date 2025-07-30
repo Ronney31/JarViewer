@@ -15,7 +15,7 @@ def test_integration():
     # Test backend health
     print("Testing backend health...")
     try:
-        response = requests.get("http://localhost:8000/health", timeout=5)
+        response = requests.get("http://localhost:9000/health", timeout=5)
         if response.status_code == 200:
             print("✅ Backend is healthy")
             print(f"   Response: {response.json()}")
@@ -64,7 +64,7 @@ Implementation-Version: 1.0.0
         print("Testing JAR upload...")
         with open(jar_path, 'rb') as f:
             files = {'file': ('test-app.jar', f, 'application/java-archive')}
-            response = requests.post("http://localhost:8000/api/v1/jars/upload", files=files, timeout=30)
+            response = requests.post("http://localhost:9000/api/v1/jars/upload", files=files, timeout=30)
         
         if response.status_code == 200:
             print("✅ JAR upload successful")
@@ -82,7 +82,7 @@ Implementation-Version: 1.0.0
         
         # Test metadata extraction
         print("\nTesting metadata extraction...")
-        response = requests.get(f"http://localhost:8000/api/v1/jars/{jar_id}/metadata", timeout=10)
+        response = requests.get(f"http://localhost:9000/api/v1/jars/{jar_id}/metadata", timeout=10)
         if response.status_code == 200:
             print("✅ Metadata extraction successful")
             metadata = response.json()
@@ -95,7 +95,7 @@ Implementation-Version: 1.0.0
         
         # Test dependency analysis
         print("\nTesting dependency analysis...")
-        response = requests.get(f"http://localhost:8000/api/v1/jars/{jar_id}/analysis/comprehensive", timeout=30)
+        response = requests.get(f"http://localhost:9000/api/v1/jars/{jar_id}/analysis/comprehensive", timeout=30)
         if response.status_code == 200:
             print("✅ Dependency analysis successful")
             analysis = response.json()
@@ -110,7 +110,7 @@ Implementation-Version: 1.0.0
         
         # Test dependency tree
         print("\nTesting dependency tree generation...")
-        response = requests.get(f"http://localhost:8000/api/v1/jars/{jar_id}/dependencies/tree", timeout=20)
+        response = requests.get(f"http://localhost:9000/api/v1/jars/{jar_id}/dependencies/tree", timeout=20)
         if response.status_code == 200:
             print("✅ Dependency tree generation successful")
             tree = response.json()
